@@ -122,7 +122,9 @@ interface Prefs {
   worktreeCleanupInactive: boolean; // remove idle worktrees with no chats/tabs (same)
   worktreeCleanupInactiveDays: number; // idle threshold for the rule above, 0 = off
   holdToQuit: boolean; // ⌘Q must be held ~1 s to quit (read by Go, src-wails/quithold.go)
+  activityLog: boolean; // note clicks/routes/shortcuts/sends into <app-data>/activity (src/lib/activityLog.ts); never typed text
   floatPopouts: boolean; // popped-out terminal/chat windows open floating (no zoom button, tiling WMs float them)
+  sidebarInbox: boolean; // a global Inbox (needs you + unread) above the per-project groups
   trayHotkey: string; // global shortcut for the tray panel, "⌥Space" style (src-wails/trayhotkey.go); "" = off
   coreAtLogin: boolean; // the external core stays up for good (read by Go, src-wails/coreidle.go; plan 009)
   subagentAutoDeliver: boolean; // send a finished/blocked sub-agent's result into its parent chat (read by Go, src-wails/chatsubagentnotice.go)
@@ -171,6 +173,7 @@ export const NTFY_EVENTS: { id: NtfyEvent; label: string }[] = [
 // the whole UI relative to it, so the default uiFontSize being above the
 // baseline makes the default UI render slightly larger.
 const BASE_FONT_SIZE = 13;
+const PHONE_FONT_SIZE = 14;
 
 // Haiku is the cheap default t3code picks too (their
 // DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER). Three-part = the CLI's own
@@ -237,6 +240,8 @@ const DEFAULT_PREFS: Prefs = {
   subagentAutoDeliver: true,
   coreAtLogin: false,
   floatPopouts: false,
+  activityLog: false,
+  sidebarInbox: true,
   holdToQuit: true,
   trayHotkey: "⌥Space",
   worktreeCleanupMerged: false,
@@ -391,6 +396,8 @@ export const useUIStore = defineStore("ui", () => {
   const subagentAutoDeliver = ref<boolean>(loaded.subagentAutoDeliver ?? true);
   const coreAtLogin = ref<boolean>(loaded.coreAtLogin ?? false);
   const floatPopouts = ref<boolean>(loaded.floatPopouts ?? false);
+  const activityLog = ref<boolean>(loaded.activityLog ?? false);
+  const sidebarInbox = ref<boolean>(loaded.sidebarInbox ?? true);
   const holdToQuit = ref<boolean>(loaded.holdToQuit ?? true);
   const trayHotkey = ref<string>(loaded.trayHotkey ?? "⌥Space");
   const worktreeCleanupMerged = ref<boolean>(loaded.worktreeCleanupMerged ?? false);
@@ -467,6 +474,8 @@ export const useUIStore = defineStore("ui", () => {
     subagentAutoDeliver.value = p.subagentAutoDeliver ?? true;
     coreAtLogin.value = p.coreAtLogin ?? false;
     floatPopouts.value = p.floatPopouts ?? false;
+    activityLog.value = p.activityLog ?? false;
+    sidebarInbox.value = p.sidebarInbox ?? true;
     holdToQuit.value = p.holdToQuit ?? true;
     trayHotkey.value = p.trayHotkey ?? "⌥Space";
     worktreeCleanupMerged.value = p.worktreeCleanupMerged ?? false;
@@ -504,7 +513,9 @@ export const useUIStore = defineStore("ui", () => {
   // Whole-UI zoom factor applied to #app. The terminal must counter-zoom by 1/this
   // and scale its own font by this instead — CSS `zoom` on an ancestor breaks
   // xterm.js mouse-selection coordinate math (selection lands on the wrong rows).
-  const effectiveScale = computed(() => uiScale.value * (uiFontSize.value / BASE_FONT_SIZE));
+  // A phone ignores the desk font size: the stylesheets' px at 16/13 made every row,
+  // card and button a quarter bigger than the native iOS app's. uiScale still applies.
+  const effectiveScale = computed(() => uiScale.value * ((compact.value ? PHONE_FONT_SIZE : uiFontSize.value) / BASE_FONT_SIZE));
 
   // Apply the active theme's colors as CSS custom properties on :root, so all
   // chrome styled via var(--bg-base) etc. repaints. Font + layout vars are left
@@ -667,6 +678,8 @@ export const useUIStore = defineStore("ui", () => {
         subagentAutoDeliver: subagentAutoDeliver.value,
         coreAtLogin: coreAtLogin.value,
         floatPopouts: floatPopouts.value,
+        activityLog: activityLog.value,
+        sidebarInbox: sidebarInbox.value,
         holdToQuit: holdToQuit.value,
         trayHotkey: trayHotkey.value,
         worktreeCleanupMerged: worktreeCleanupMerged.value,
@@ -691,7 +704,7 @@ export const useUIStore = defineStore("ui", () => {
      soundWaitingId, soundWaitingCustomPath, soundVolume, rightPanelVisible, maxAgents, mcpMaxDepth, debugOverlay, debugIds, floatCorner, worktreesDir, defaultProjectDir, mode,
      ntfyEnabled, ntfyServer, ntfyTopic, ntfyToken, ntfyEvents, ntfyOnlyWhenAway,
      petsEnabled, petsSpeech, petsLeveling, floatChatEnabled, floatChatOpen,
-     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, holdToQuit, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
+     sidebarVisible, sidebarWidth, rightPanelWidth, toastPosition, defaultChatAgent, spawnMode, channelMarker, chatAutoSleepMinutes, chatRecaps, worktreeFromOrigin, subagentAutoDeliver, coreAtLogin, floatPopouts, activityLog, sidebarInbox, holdToQuit, trayHotkey, worktreeCleanupMerged, worktreeCleanupInactive, worktreeCleanupInactiveDays, textGenerationModel, textGenerationPolicy, textGenerationRules],
     () => {
       savePrefs();
       applyTheme();
@@ -722,6 +735,7 @@ export const useUIStore = defineStore("ui", () => {
     app.style.height = scale === 1 ? "" : `${window.innerHeight / scale}px`;
   }
   window.addEventListener("resize", applyAppScale);
+  watch(compact, applyAppScale);
 
   // Which Settings nav section to land on. Set by callers that deep-link
   // (palette → "Keybindings"/"Appearance"); Settings.vue reads it on mount.
@@ -1010,6 +1024,8 @@ export const useUIStore = defineStore("ui", () => {
     subagentAutoDeliver,
     coreAtLogin,
     floatPopouts,
+    activityLog,
+    sidebarInbox,
     holdToQuit,
     trayHotkey,
     worktreeCleanupMerged,

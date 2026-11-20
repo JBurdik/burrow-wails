@@ -156,6 +156,20 @@
               </div>
               <Switch :checked="ui.subagentAutoDeliver" @update:checked="(v: boolean) => ui.subagentAutoDeliver = v" />
             </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Inbox in the sidebar</span>
+                <span class="text-[11px] text-muted-foreground">Threads that need you or have an unread reply, from every project, in one Inbox at the top. Off: each project lists its own "Needs you" first.</span>
+              </div>
+              <Switch :checked="ui.sidebarInbox" @update:checked="(v: boolean) => ui.sidebarInbox = v" />
+            </div>
+            <div class="flex items-center gap-4 s-row">
+              <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+                <span class="text-[13px] font-medium text-foreground">Keep an activity log</span>
+                <span class="text-[11px] text-muted-foreground">Notes what you click, open and send (never what you type) in the app data's activity folder, a file a day, kept 30 days and never sent anywhere. Agents read it with <code>burrow activity</code>.</span>
+              </div>
+              <Switch :checked="ui.activityLog" @update:checked="(v: boolean) => ui.activityLog = v" />
+            </div>
             <div v-if="canOpenWindows()" class="flex items-center gap-4 s-row">
               <div class="flex flex-1 min-w-0 flex-col gap-0.5">
                 <span class="text-[13px] font-medium text-foreground">Float popped-out windows</span>
@@ -1490,8 +1504,16 @@ const textGenModelOptions = computed(() =>
         value: textGenerationValue(agent.kind, agent.providerId, model.id),
         label: `${agent.name} · ${model.label}`,
       })),
+  ).concat(
+    // On-device, no provider instance: the core's burrow-fm sidecar (macOS 26+, Apple Intelligence on).
+    // Kept while selected even if unavailable, so the picker never shows blank (Go falls back to Claude).
+    appleTextGen.value || textGenSelection.value.providerId === "apple"
+      ? [{ value: textGenerationValue("apple", "apple", "system"), label: "Apple Intelligence · On-device" }]
+      : [],
   ),
 );
+const appleTextGen = ref(false);
+invoke<boolean>("text_gen_apple_available").then((ok) => { appleTextGen.value = ok; }).catch(() => {});
 // The preference is one string ("kind::provider::model::effort"); the two
 // pickers are views on it, so switching model can't leave an effort behind that
 // the new model never published.

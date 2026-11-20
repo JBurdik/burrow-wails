@@ -11,10 +11,22 @@
  * Must not import xterm (boundary.test.ts) — the view hands in `write`.
  */
 
-/** The pty-data-<id> payload. `off` is null from a daemon that predates it. */
+/** A decoded pty-data-<id> payload. `off` is null from a daemon that predates it. */
 export interface PtyChunk {
   off: number | null;
-  data: number[];
+  data: Uint8Array | number[];
+}
+
+/** pty-data-<id> / pty_since as they arrive: `data` is base64 since protocol
+ *  rev 2, a number array from an older core. */
+export interface PtyWireChunk {
+  off: number | null;
+  data: string | number[] | null;
+}
+
+export function decodePtyChunk(c: PtyWireChunk): PtyChunk {
+  const d = c.data ?? [];
+  return { off: c.off, data: typeof d === "string" ? Uint8Array.from(atob(d), (ch) => ch.charCodeAt(0)) : d };
 }
 
 export interface PtyStream {
@@ -22,14 +34,24 @@ export interface PtyStream {
   push(chunk: PtyChunk): void;
   /** Fetch whatever was missed since the last rendered byte (call on reconnect). */
   catchUp(): Promise<void>;
+  /**
+   * Start from a screen snapshot instead of mid-stream (plan 010 `pty_attach`).
+   * Live chunks are held while `fetch` runs; `paint` gets the snapshot (reset
+   * the view, write its bytes) and the stream continues at `snap.off` — the
+   * snapshot already contains every byte before it. A null / failed fetch
+   * (daemon without an emulator) changes nothing: the held chunks render as
+   * they would have. Resolves whether a snapshot was painted.
+   */
+  attach<S extends { off: number }>(fetch: () => Promise<S | null>, paint: (snap: S) => void): Promise<boolean>;
   /** Forget the position: the PTY behind this id exited / was replaced. */
   reset(): void;
 }
 
 export function createPtyStream(opts: {
-  write: (bytes: number[]) => void;
+  write: (bytes: Uint8Array | number[]) => void;
   fetchSince: (since: number) => Promise<PtyChunk>;
-  /** The daemon's ring no longer held `bytes` of the gap — they are gone. */
+  /** The daemon's ring no longer held `bytes` of the gap — they are gone
+   *  (or, from `pty_attach`, about to be repainted from a snapshot). */
   onLost?: (bytes: number) => void;
 }): PtyStream {
   // Offset of the next byte to render; null = no position yet (first chunk
@@ -86,9 +108,31 @@ export function createPtyStream(opts: {
     for (const c of h) push(c);
   }
 
+  async function attach<S extends { off: number }>(fetch: () => Promise<S | null>, paint: (snap: S) => void) {
+    if (catching) return false;
+    catching = true;
+    let painted = false;
+    try {
+      const snap = await fetch();
+      if (snap) {
+        paint(snap);
+        next = snap.off;
+        painted = true;
+      }
+    } catch {
+      /* no emulator in this daemon — carry on from live output */
+    }
+    catching = false;
+    const h = held;
+    held = [];
+    for (const c of h) push(c);
+    return painted;
+  }
+
   return {
     push,
     catchUp,
+    attach,
     reset() {
       next = null;
       held = [];

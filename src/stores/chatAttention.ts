@@ -6,10 +6,12 @@ import { DONE_AUTOCLEAR_MS, displayStatus, shouldMarkSeen, type Phase } from "@/
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
-import { subagentArchivable } from "@/stores/chatTree";
+import { subagentArchivable, subagentQuietCandidate } from "@/stores/chatTree";
 import { liveChatSessionIds } from "@/lib/chatSession";
 import { appChatHost, notifyWoke } from "@/lib/chatHost";
 import { onSeenChanged, shareSeen } from "@/lib/seenSync";
+import { retrying } from "@/lib/retrying";
+import { appTransport } from "@/lib/wailsCompat/core";
 
 // Shared with Terminal.vue's PTY receipts: one key, one receipt per subject.
 // PTY leaves use their bare numeric id, chats `chat:<id>` — Terminal.vue's
@@ -171,6 +173,25 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
     doneTimers.delete(chatId);
   }
 
+  // A phase only travels on change, so a turn that stays `running` sends nothing:
+  // a seed that failed (socket still opening on a reopened window, core restart)
+  // left the chat idle — no Working — until the turn ended. Retry it, and re-read
+  // on every resync, where phase events were lost (then the snapshot wins).
+  function seedPhases(ids: number[], authoritative: boolean): void {
+    void retrying(() => invoke<ShellSnapshotData>("shell_snapshot")).then((snapshot) => {
+      for (const id of ids) {
+        if (!isLive(id)) continue;
+        const phase = snapshot.phases[chatKey(id)];
+        if (phase && (authoritative || !phaseFromEvent.has(id))) applyPhase(id, phase);
+      }
+    }).catch(() => {});
+  }
+  try {
+    appTransport().onResync(() => seedPhases([...unlisteners.keys(), ...pendingListeners], true));
+  } catch {
+    // no backend (tests, browser-only dev)
+  }
+
   const isLive = (id: number) => chats.sessions.some((session) => session.id === id && !session.archivedAt);
 
   watch(
@@ -185,12 +206,7 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
       if (freshIds.length === 0) return;
       freshIds.forEach((id) => pendingListeners.add(id));
 
-      void invoke<ShellSnapshotData>("shell_snapshot").then((snapshot) => {
-        for (const id of freshIds) {
-          const phase = snapshot.phases[chatKey(id)];
-          if (phase && !phaseFromEvent.has(id)) applyPhase(id, phase);
-        }
-      }).catch(() => {});
+      seedPhases(freshIds, false);
 
       for (const id of freshIds) {
         void listen<Phase>(`phase-chat:${id}`, (event) => {
@@ -260,11 +276,19 @@ export const useChatAttentionStore = defineStore("chatAttention", () => {
   // ponytail: 1-minute poll; a per-chat timer only matters if 30 min ± 1 does.
   // The main window sweeps; a secondary one (popped chat, tray panel) would
   // archive the same rows a second time.
+  const quietAsking = new Set<number>();
   if (typeof location === "undefined" || !location.hash.startsWith("#/window/")) setInterval(() => {
     const now = Date.now();
     for (const session of chats.sessions) {
-      if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, (watchers.get(session.id) ?? 0) > 0, now)) {
+      const watching = (watchers.get(session.id) ?? 0) > 0;
+      if (subagentArchivable(session, phases.get(session.id), seenAt.get(session.id) ?? 0, watching, now)) {
         void chats.archive(session.id);
+      } else if (subagentQuietCandidate(session, phases.get(session.id), watching) && !quietAsking.has(session.id)) {
+        quietAsking.add(session.id);
+        void invoke<boolean>("chat_quiet_archivable", { chatId: session.id })
+          .then((ok) => { if (ok) return chats.archive(session.id); })
+          .catch(() => {})
+          .finally(() => quietAsking.delete(session.id));
       }
     }
   }, 60_000);

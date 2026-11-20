@@ -241,14 +241,16 @@ func TestFoldEmitsChangedTail(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(got) != 3 {
-		t.Fatalf("want one event per changed line, got %d: %+v", len(got), got)
+	// The third line only grows the streaming row: a chat-tail append, not a
+	// splice (chatsplice_test.go covers the tail).
+	if len(got) != 2 {
+		t.Fatalf("want one splice per structural change, got %d: %+v", len(got), got)
 	}
 	if got[0].FromIndex != 0 || len(got[0].Messages) != 1 {
 		t.Fatalf("first event should carry just the new prompt: %+v", got[0])
 	}
-	if got[2].FromIndex != 1 || len(got[2].Messages) != 1 || got[2].Messages[0].Text != "hotovo" {
-		t.Fatalf("a delta should carry only the message it grew: %+v", got[2])
+	if got[1].FromIndex != 1 || len(got[1].Messages) != 1 || got[1].Messages[0].Text != "ho" {
+		t.Fatalf("a new row should carry only that row: %+v", got[1])
 	}
 	if isRingable(chatMessagesChangedPrefix + "5") {
 		t.Fatal("the transcript tail must stay out of the replay ring")

@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { cachedRead } from "@/lib/wailsCompat/core";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 
 export interface Workspace {
@@ -130,6 +131,8 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   }
 
   async function load() {
+    // A paired device paints the last list it saw while the socket opens.
+    if (!workspaces.value.length) workspaces.value = cachedRead<Workspace[]>("list_workspaces") ?? [];
     workspaces.value = await invoke<Workspace[]>("list_workspaces");
     // A deleted workspace (worktree removed by a verb, the cleanup, another
     // window) must also leave `opened`, or its Terminal stays mounted with

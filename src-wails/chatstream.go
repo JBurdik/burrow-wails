@@ -116,6 +116,7 @@ type chatStreamWriter struct {
 	// it is never taken while a chatTail's own mu is held (see the t.mu →
 	// w.mu lock-order note on lockChatTail in chattranscript.go).
 	tails       map[string]*chatTail
+	splices     map[string]*chatSpliceLog // chatsplice.go
 	dropped     int
 	hardCapHits map[string]int
 }
@@ -127,6 +128,7 @@ func newChatStreamWriter(db *sql.DB) *chatStreamWriter {
 		nextOrd:     map[string]int64{},
 		appends:     map[string]int{},
 		tails:       map[string]*chatTail{},
+		splices:     map[string]*chatSpliceLog{},
 		hardCapHits: map[string]int{},
 	}
 	go w.run()
@@ -178,16 +180,20 @@ func (w *chatStreamWriter) flush() {
 
 // loadMaxOrdLocked resumes a chat's numbering across app restarts, so a replay
 // after a crash sees one continuous sequence. Runs once per chat per run.
+//
+// Never below folded_ord: a clear or rewind deletes every stream line, and
+// the ord (= the splice revision clients hold, chatsplice.go) must keep
+// counting past them, not restart at 0.
 func (w *chatStreamWriter) loadMaxOrdLocked(chatID string) int64 {
-	var max sql.NullInt64
-	if err := w.db.QueryRow(`SELECT MAX(ord) FROM chat_stream WHERE chat_id = ?`, chatID).Scan(&max); err != nil {
+	var next sql.NullInt64
+	if err := w.db.QueryRow(
+		`SELECT MAX(COALESCE((SELECT MAX(ord) + 1 FROM chat_stream WHERE chat_id = ?), 0),
+		            COALESCE((SELECT folded_ord FROM chat_stream_state WHERE chat_id = ?), 0))`,
+		chatID, chatID).Scan(&next); err != nil {
 		log.Printf("chat stream: max ord for %s: %v", chatID, err)
 		return 0
 	}
-	if !max.Valid {
-		return 0
-	}
-	return max.Int64 + 1
+	return next.Int64
 }
 
 func (w *chatStreamWriter) run() {
@@ -334,6 +340,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 		if a.phases != nil {
 			for _, e := range events {
 				a.noteUsageLimitEvent(chatID, e, time.Now())
+				a.noteNetFailure(chatID, e, time.Now())
 				if pev, ok := chatPhaseEvent(e); ok {
 					before := a.phases.Get("chat:" + chatID)
 					a.applyChatPhase(chatID, pev) // also settles the turn audit
@@ -348,6 +355,7 @@ func (a *App) emitChatLine(chatID, kind, line string) {
 				a.clearSettledOverrideOnRunning(chatID)
 				a.clearCollectedOnRunning(chatID)
 				a.clearUsageLimitOnRunning(chatID)
+				a.clearNetWaitOnRunning(chatID)
 			}
 		}
 
@@ -434,6 +442,7 @@ func (a *App) PublishChatNote(chatID string, note string) error {
 	if normalizeChatNote(note, 0) == nil {
 		return fmt.Errorf("publish_chat_note: not a valid chat note: %s", note)
 	}
+	note = a.noteImagesByRef(chatID, note)
 	a.emitChatLine(chatID, chatNoteKind, note)
 	return nil
 }
@@ -485,7 +494,14 @@ func (a *App) LoadChatStreamSince(chatID string, since int64) ([]ChatStreamLine,
 		}
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close() // storing images below writes; don't hold the read open
+	for i := range out {
+		out[i].Line = a.lineImagesByRef(chatID, out[i].Kind, out[i].Line)
+	}
+	return out, nil
 }
 
 // ChatFoldedOrd is where a client resumes replay from after an app restart:
@@ -520,6 +536,7 @@ func (a *App) deleteChatStream(chatID string) error {
 		// removed tail can no longer persist — persistChatTail checks that
 		// its tail is still the map's.
 		delete(w.tails, chatID)
+		w.dropSpliceLogLocked(chatID)
 		w.mu.Unlock()
 	}
 	_, err := a.db.Exec(`DELETE FROM chat_stream WHERE chat_id = ?`, chatID)
@@ -589,7 +606,24 @@ scan:
 			if strings.Contains(l.Line, `"_burrow":"turn"`) {
 				break scan
 			}
+			// Codex resolves its own requests (and acpAnsweredLine stands in
+			// for generic ACP); walking back, the resolution comes first.
+			var m struct {
+				Method string `json:"method"`
+				Params struct {
+					RequestID json.RawMessage `json:"requestId"`
+				} `json:"params"`
+			}
+			if json.Unmarshal([]byte(l.Line), &m) == nil && m.Method == "serverRequest/resolved" {
+				cancelled["acp:"+string(m.Params.RequestID)] = true
+			}
 		case "acp-req":
+			var m struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if json.Unmarshal([]byte(l.Line), &m) == nil && cancelled["acp:"+string(m.ID)] {
+				continue
+			}
 			found = append(found, l)
 		}
 	}

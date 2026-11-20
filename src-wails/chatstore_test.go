@@ -285,3 +285,36 @@ func TestPageStubsLargeImagesAndLoadChatImageReturnsThem(t *testing.T) {
 		t.Fatal("stubbing must only affect the page, never the stored transcript")
 	}
 }
+
+// An old `/context` report row (folded before the fold dropped them) goes out
+// marked plumbing on every read path, at its own index.
+func TestOldContextReportRowIsPlumbingOnRead(t *testing.T) {
+	a := newTestApp(t)
+	in := `[{"id":0,"role":"user","text":"/context"},{"id":1,"role":"assistant","text":"## Context\nEstimated usage by category\n..."},{"id":2,"role":"assistant","text":"hi"}]`
+	if err := a.SaveChatMessages(5, in, -1); err != nil {
+		t.Fatal(err)
+	}
+	check := func(where string, rows []ChatMessage) {
+		t.Helper()
+		if len(rows) != 3 || rows[0].Plumbing || !rows[1].Plumbing || rows[2].Plumbing {
+			t.Fatalf("%s: %+v", where, rows)
+		}
+	}
+	page, err := a.chatPageRows(5, -1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("page", page.rows)
+	raw, err := a.LoadChatMessages(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all []ChatMessage
+	if err := json.Unmarshal([]byte(raw), &all); err != nil {
+		t.Fatal(err)
+	}
+	check("load", all)
+	if m := stubRowImages(all[1], 1, false); !m.Plumbing {
+		t.Fatal("splice door must mark it")
+	}
+}

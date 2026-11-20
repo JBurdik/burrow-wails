@@ -101,6 +101,16 @@ type Chat struct {
 	PrNumber int64  `json:"pr_number"`
 	PrURL    string `json:"pr_url"`
 	PrState  string `json:"pr_state"`
+	// Read-only on the wire: the last turn's end_turn as JSON (chatturnneeds.go),
+	// "" = none. Cleared when the next turn starts.
+	TurnNeeds string `json:"turn_needs"`
+	// Read-only on the wire (chatnetresume.go): a turn cut by the network or a
+	// restart waits to carry on by itself; reason network | restart.
+	NetWaitAt     int64  `json:"net_wait_at"`
+	NetWaitReason string `json:"net_wait_reason"`
+	// Computed, not columns (chatattention.go): the thread-attention facts
+	// every client used to derive itself. Read-only on the wire.
+	ChatAttention
 }
 
 func chatsSchema() []string {
@@ -137,7 +147,11 @@ func chatsSchema() []string {
 			limit_resumed_key TEXT    NOT NULL DEFAULT '',
 			pr_number         INTEGER NOT NULL DEFAULT 0,
 			pr_url            TEXT    NOT NULL DEFAULT '',
-			pr_state          TEXT    NOT NULL DEFAULT ''
+			pr_state          TEXT    NOT NULL DEFAULT '',
+			turn_needs        TEXT    NOT NULL DEFAULT '',
+			net_wait_at       INTEGER NOT NULL DEFAULT 0,
+			net_wait_reason   TEXT    NOT NULL DEFAULT '',
+			net_resume_tries  INTEGER NOT NULL DEFAULT 0
 		)`,
 		// A PR the user unlinked from a chat: auto-linking never re-adds it.
 		`CREATE TABLE IF NOT EXISTS chat_pr_dismissed (
@@ -176,7 +190,7 @@ const chatColumns = `id, workspace_id, title, pinned_title, claude_session_id,
 	settled_override, archived_at, last_activity_at, parent_chat_id, collected_at,
 	effort, permission_mode, profile_id, append_system_prompt, slept_at, recap, kind, snoozed_until,
 	limit_reset_at, limit_resume_at,
-	pr_number, pr_url, pr_state`
+	pr_number, pr_url, pr_state, turn_needs, net_wait_at, net_wait_reason`
 
 func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 	var c Chat
@@ -185,7 +199,7 @@ func scanChat(rows interface{ Scan(...any) error }) (Chat, error) {
 		&c.SettledOverride, &c.ArchivedAt, &c.LastActivityAt, &c.ParentChatID, &c.CollectedAt,
 		&c.Effort, &c.PermissionMode, &c.ProfileID, &c.AppendSystemPrompt, &c.SleptAt, &c.Recap, &c.Kind, &c.SnoozedUntil,
 		&c.LimitResetAt, &c.LimitResumeAt,
-		&c.PrNumber, &c.PrURL, &c.PrState)
+		&c.PrNumber, &c.PrURL, &c.PrState, &c.TurnNeeds, &c.NetWaitAt, &c.NetWaitReason)
 	return c, err
 }
 
@@ -198,6 +212,7 @@ func (a *App) ListChats() ([]Chat, error) {
 	if a.db == nil {
 		return out, nil
 	}
+	now := time.Now().UnixMilli()
 	rows, err := a.db.Query(`SELECT ` + chatColumns + ` FROM chats ORDER BY id`)
 	if err != nil {
 		return out, err
@@ -208,6 +223,7 @@ func (a *App) ListChats() ([]Chat, error) {
 		if err != nil {
 			return out, err
 		}
+		c.ChatAttention = chatAttentionFor(c, now)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -276,7 +292,17 @@ func (a *App) SaveChats(chats []Chat) error {
 		if c.ID <= 0 {
 			continue
 		}
-		if _, err := stmt.Exec(c.Title, c.PinnedTitle, c.ClaudeSessionID,
+		// A default title never overwrites a real one: Go titles a thread on
+		// its first prompt (chattitle.go), and a client still holding
+		// "Chat N" saves on every streamed message.
+		title := c.Title
+		if isDefaultChatTitle(title) {
+			var cur string
+			if tx.QueryRow(`SELECT title FROM chats WHERE id = ?`, c.ID).Scan(&cur) == nil && !isDefaultChatTitle(cur) {
+				title = cur
+			}
+		}
+		if _, err := stmt.Exec(title, c.PinnedTitle, c.ClaudeSessionID,
 			c.MessageCount, c.AgentKind, c.Transport, c.Model,
 			c.SettledOverride, c.ArchivedAt, c.LastActivityAt, c.ParentChatID, c.ID); err != nil {
 			return err
@@ -324,6 +350,8 @@ func (a *App) DeleteChat(id int64) error {
 			return err
 		}
 		_, _ = a.db.Exec(`DELETE FROM chat_pr_dismissed WHERE chat_id = ?`, c)
+		_, _ = a.db.Exec(`DELETE FROM chat_pins WHERE chat_id = ?`, c)
+		_, _ = a.db.Exec(`DELETE FROM chat_action_presses WHERE chat_id = ?`, c)
 		if _, err := a.db.Exec(`DELETE FROM chat_schedules WHERE chat_id = ?`, c); err != nil {
 			return err
 		}
@@ -340,6 +368,11 @@ func (a *App) DeleteChat(id int64) error {
 	}
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		return sql.ErrNoRows
+	}
+	if a.phases != nil {
+		for _, c := range ids {
+			a.phases.Forget("chat:" + strconv.FormatInt(c, 10))
+		}
 	}
 	busEmit("chats-changed", nil)
 	return nil

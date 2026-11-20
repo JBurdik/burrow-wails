@@ -77,7 +77,7 @@ func TestAnswerChatQuestionWritesTheToolAnswer(t *testing.T) {
 	}
 	a.phases = store
 	c, _ := a.CreateChat(Chat{WorkspaceID: ws, Transport: "claude-cli"})
-	if err := a.ChatSend(c.ID, "go", nil); err != nil {
+	if err := a.ChatSend(c.ID, "go", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	id := strconv.FormatInt(c.ID, 10)

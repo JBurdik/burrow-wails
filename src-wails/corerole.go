@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"burrow/internal/ctlauth"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -42,6 +43,12 @@ func coreRoleRequested() bool {
 // runCore is the backend with no window: what main_headless.go does, minus
 // forcing remote access on (the desktop's Settings owns that toggle).
 func runCore() {
+	// An `mcp` build (just dev-mcp) starts Wails' MCP server in the UI AND here,
+	// and a taken port is fatal: the UI holds 9099, so the core takes any free
+	// one instead of exiting before it ever serves the UI.
+	if os.Getenv("WAILS_MCP_PORT") == "" {
+		os.Setenv("WAILS_MCP_PORT", "0")
+	}
 	dataDir, err := appDataDir()
 	if err != nil {
 		log.Fatalf("core: app data dir: %v", err)
@@ -217,6 +224,18 @@ func setupNativeNotifications(n *notifications.NotificationService) {
 	}
 }
 
+// corePost signs a POST to the core's loopback port with control.token by
+// challenge-response (internal/ctlauth): the token never travels, and the reply
+// counts only once the core proved it holds the same token.
+func corePost(port, token, path string) (*http.Response, error) {
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, fmt.Errorf("hook.port: %w", err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d%s", n, path), nil)
+	return ctlauth.Client{Port: n, Key: token, HTTP: &http.Client{Timeout: 3 * time.Second}}.Do(req)
+}
+
 // askCoreToQuit is the UI's ⌥⌘Q: quit completely, core first.
 func askCoreToQuit() {
 	dataDir, err := appDataDir()
@@ -225,9 +244,7 @@ func askCoreToQuit() {
 	}
 	port, _ := os.ReadFile(filepath.Join(dataDir, "hook.port"))
 	token, _ := os.ReadFile(filepath.Join(dataDir, "control.token"))
-	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%s/v2/core-quit", strings.TrimSpace(string(port))), nil)
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
-	if resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req); err == nil {
+	if resp, err := corePost(strings.TrimSpace(strings.SplitN(string(port), "\n", 2)[0]), strings.TrimSpace(string(token)), "/v2/core-quit"); err == nil {
 		resp.Body.Close()
 	}
 }
@@ -339,9 +356,7 @@ func uiLocalEndpoint() (LocalEndpointInfo, error) {
 	if err != nil {
 		return info, err
 	}
-	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%s/v2/local-ticket", strings.TrimSpace(string(port))), nil)
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
-	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	resp, err := corePost(strings.TrimSpace(strings.SplitN(string(port), "\n", 2)[0]), strings.TrimSpace(string(token)), "/v2/local-ticket")
 	if err != nil {
 		return info, err
 	}

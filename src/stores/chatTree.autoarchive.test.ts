@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { subagentArchivable, SUBAGENT_AUTOARCHIVE_MS } from "./chatTree";
+import { subagentArchivable, subagentQuietCandidate, SUBAGENT_AUTOARCHIVE_MS } from "./chatTree";
 import type { ClaudeSession } from "./claudeChats";
 import type { Phase } from "@/runtime/displayStatus";
 
@@ -48,5 +48,16 @@ describe("subagentArchivable", () => {
     expect(subagentArchivable(child({ parentChatId: undefined }), phase(), SEEN, false, LATER)).toBe(false);
     expect(subagentArchivable(child({ archivedAt: 1 }), phase(), SEEN, false, LATER)).toBe(false);
     expect(subagentArchivable(child(), undefined, SEEN, false, LATER)).toBe(false);
+  });
+
+  it("names a quiet child only as a candidate (Go confirms loose ends)", () => {
+    const quiet = { needs: "nothing" as const };
+    expect(subagentArchivable(child({ turnNeeds: quiet }), phase(), 0, false, ENDED)).toBe(false);
+    expect(subagentQuietCandidate(child({ turnNeeds: quiet }), phase(), false)).toBe(true);
+    expect(subagentQuietCandidate(child({ turnNeeds: { needs: "nothing", next: ["more"] } }), phase(), false)).toBe(false);
+    expect(subagentQuietCandidate(child({ turnNeeds: quiet }), phase({ state: "failed" }), false)).toBe(false);
+    expect(subagentQuietCandidate(child({ turnNeeds: quiet, collectedAt: undefined }), phase(), false)).toBe(false);
+    expect(subagentQuietCandidate(child({ turnNeeds: quiet }), phase(), true)).toBe(false);
+    expect(subagentQuietCandidate(child({ turnNeeds: quiet, kind: "side" }), phase(), false)).toBe(false);
   });
 });

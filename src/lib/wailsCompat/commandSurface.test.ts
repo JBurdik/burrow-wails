@@ -334,9 +334,6 @@ function remoteAllowedTable(): Map<string, string[]> {
  * nothing) or one `command.argument` pair. Keep the reason with the entry.
  */
 const ARGUMENT_SHAPE_EXCEPTIONS: Record<string, string> = {
-  // Also reshaped in core.ts, which supplies the `foldedOrd` sentinel the
-  // call sites may omit.
-  save_chat_messages: "core.ts fills in foldedOrd",
   // Harmless leftover, and the one case where dropping the value is right:
   // CreateWorktree (git.go) looks the parent workspace up from repoPath
   // itself, so it has no parent-id parameter for this to land in.

@@ -115,6 +115,11 @@ A settled, seen, **collected** (`collected_at`, read-only on `Chat`) sub-agent i
 30 min by `chatAttention`'s desktop sweep (`subagentArchivable` in `chatTree.ts`) — client-side because
 "watching" is client-side. No Archived shelf for sub-agents: it just leaves the RP list.
 
+**Titles** (`chattitle.go`): a top-level thread's first prompt (`chatSendBody`'s `first`) renames a row still at
+"Chat N" / "Chat N (phone)" to a heuristic, then async to `GenerateChatTitle` — both conditional UPDATEs (title unchanged,
+not pinned), so every door (desktop, tray, phone, CLI) gets one and a rename wins. `SaveChats` never lets a default title
+overwrite a real one (a client still holding "Chat N" saves per streamed message).
+
 **Snooze** (`chatsnooze.go`): `chats.snoozed_until` (unix ms, 0 = none, read-only on the wire) keeps a chat
 in Settled until then (`settledFor`); `ChatSnooze` / `chat_snooze` sets or clears it, and `chatScheduleLoop`'s
 sweep wakes it — clears the column and the settle pin, bumps `last_activity_at`, emits `chat-snooze-woke`
@@ -126,6 +131,78 @@ wire; the forge is the workspace's). `forgePrCreate` auto-links a created PR to 
 (`#N` / URL, refused if the URL is another repo's) / `chat_unlink_pr` from ThreadDetailsCard's PR row. Unlink writes a
 `chat_pr_dismissed` tombstone that auto-link respects and a manual link clears. No polling: `chat_pr_refresh` when the
 card opens, `chat_prs_refresh(cwd)` after a push from `git.push`; Sidebar rows show the state glyph.
+
+**End of turn** (`chatturnneeds.go`, `internal/control/verbs_turn.go`, `TurnNeedsCard.vue`, from threadbear's `end_turn`): the
+`end_turn` verb/MCP tool (local, caller chat) stores what the turn needs as JSON in `chats.turn_needs` (read-only on the
+wire, `remoteDenied` for the setter) — `needs` you|nothing, `asks` (question + ≤ 6 options, each `{label, description}` or a bare string — stored as `options` + parallel `details` + `suggested`), `next` (≤ 3
+follow-ups). `applyChatPhase` clears it on the **transition into flight** (not on every Running line: the call is made
+mid-turn). AgentChat shows the card only while not busy: Needs you = buttons / Something else, one ask at a time, sent
+with the composer text through **`chat_answer_turn(chatId, picks, extra, clientId)`** (`chatanswerturn.go`): clients send
+only picks (`[{index, options?, text?}]`; Done card = the picked `next`), Go validates them against the stored card, adds
+kept run replies, composes the one message (`composeTurnAnswer`, table-tested) and submits it like `chat_submit` (+ the composer's `images`); the reply's `text` = the composed message, which becomes the client's **echo** (preview first; `answerTurn` in `chatSession.ts`, iOS `AppModel.answerTurn`), and offline it is **held** in the outbox as an answer item (`answer: {picks, extra}`, delivered via `chat_answer_turn` with the same clientId — `heldCall` / `OutboxItem.call`; a changed card is a refusal: marked, never retried); Done = Archive + follow-ups + **loose ends**
+(`chat_loose_ends`: uncommitted files, commits on no remote, open PR, sub-agents in flight, pending check-ins — Go's own
+checks, never the agent's word). **Run on the card:** an ask's `run` (checked by `control.RunCommandProblem`: no
+control / bidi / zero-width chars, ≤ 8000) gets a Run button; `chat_run_ask(chatId, index)` runs the **stored** command
+(never client text) once (`state` running → done + `exit` in the JSON, CAS on the row) via `/bin/sh -c` in the chat's
+cwd, no stdin, 10 min, and `ChatQueueAdd`s the output as the user's reply. `runAskShell` (also schedule checks) runs
+in its **own process group** and the deadline kills the group (+ `WaitDelay`) — killing only `sh` hung on a child holding
+the pipe. Refused on an archived thread / missing folder; `resetInterruptedRuns` (startup) turns a `running` left by a
+restart into `interrupted`, runnable again. **Quiet inbox:** `subagentArchivable`
+archives a collected, done, non-side child whose end_turn said `nothing` with no `next` at once (no receipt, no 30 min)
+— `subagentQuietCandidate` picks it, `chat_quiet_archivable` (Go) confirms no loose ends and ≤ 1 user message (nobody
+wrote to it after its task). Loose ends' git is `untrustedGit` (fsmonitor/untracked cache/hooks off, no transport, no
+`GIT_*` env, as threadbear's safe-git). ▶ on shell blocks types only into a terminal in **bracketed paste mode** whose
+prompt doesn't still hold the last typed command (`termInputState`), else copies; no `console` blocks, ≤ 8000.
+**Decisions** (`DecisionsList.vue`): every unarchived thread whose turn_needs is `you`, as its card, on top of the tray
+panel's list and the phone's Threads screen (project chip filters it); an answer is `chat_queue_add` to that thread.
+The rule lives in `claude-rule.md`; Codex/ACP see only the tool description. **Stop gate** (Claude chats only): every
+chat starts with `--settings` holding one Stop hook, `burrow end-turn-gate` (`endTurnGateSettings`): a turn ending with
+`turn_needs` still empty (`end_turn_pending` verb) is sent back **once** to call `end_turn`; `stop_hook_active` and every
+error let it stop. Tested: without it Haiku skipped `end_turn` after AskUserQuestion and under "do nothing else" tasks.
+The transcript hides plumbing calls — Go's fold sets `plumbing: true` on the row (`isPlumbingCall`, `chatfold.go`): a taken
+`end_turn` / `end_turn_pending` and `ToolSearch` (Codex/ACP's titled `burrow: end_turn` too) — the card says what end_turn
+said; a failed one stays. Rows folded before the flag are caught by the same rule in `transcriptRows.ts` / `Transcript.swift`.
+end_turn is **once per turn** (a stored `turn_needs` = already called → refused) and its result carries `next_step`, an
+instruction to write the reply now, after the call; an ask may be `multi` (checkboxes, answers joined with ", "); Codex
+gets the rule in its AGENTS.md block (`codex-agents.md`). `pin` refuses a missing file and non-http(s) schemes;
+Highlights' Files lists only review kinds (docs, pages, pictures, data — `isReviewFile`), every edit counts in Changes,
+and Links skip code blocks and host-less URLs. **Order: `end_turn` first, the reply after it** (as threadbear does): told "reply, then end_turn", Opus wrote the reply
+into its thinking, called the tool and showed only "Done." — the user never saw the answer. `Arg.Schema`
+gives a verb arg a full JSON schema for MCP (the CLI passes it as a JSON string; `Params.JSON` reads both).
+
+**Highlights** (`HighlightsSurface.vue`, RP surface `highlights`, `src/lib/chatHighlights.ts`, `chatpins.go`): one view
+of what the open thread made — its open asks (local ticks only), **pins** (`pin` verb, local, caller chat: a path
+resolved against `cwd` or an http(s) URL + note; table `chat_pins`, re-pin updates, ≤ 20, `chat-pins-changed`; wire
+`chat_pins_list` / `chat_pin_remove`; DeleteChat drops them), files its tools wrote/edited and links in its replies
+(pure projections of the **loaded** transcript window), a Changes row → Diff surface, and its sub-agents. Sections fold
+(`burrow.highlights.folded`, global). Links: localhost → Browser surface, else the system browser. Files/links come from
+the whole stored transcript (`load_chat_messages`, once per thread) merged with the live tail. `pin --show` emits
+`chat-pin-show`: the RP opens it now if that thread is on screen, else when it next is (pending in memory). An `.html` file
+opens drawn in the RP (`HtmlFileSurface`: `read_text_file` → `pageSrcdoc`, scripts in an opaque origin, no-network CSP;
+Source flips to the editor, Preview back) — like `.md` files (`MarkdownDocSurface`).
+
+**Options compare** (`src/lib/optionsBlock.ts`, `OptionsCompare.vue`, threadbear's review window): a closed ```options fence
+`{question?, options:[{label, note?, media:[paths]}], current?:[paths]}` (image / video / `.html`, cwd-relative or absolute;
+taught in the burrow-visuals skill) renders a thumbnail card; Compare opens WindowApp kind `options` (spec in the route,
+one window per chat + spec hash), on the phone a full-screen overlay in AgentChat. ←/→ every shot, ↑/↓ option to option,
+past the last all side by side; hold Space / Current = `current`; wheel/pinch zoom at the pointer, drag pans, ⌘0 /
+double-click / Esc reset; HTML via `pageSrcdoc`. Media read through the existing `read_file_base64` / `read_text_file`
+(no new surface). Send = `chat_submit` + clientId (window) / `sendMessage` (overlay): `Picked: B (label)` or `None of them: note`.
+
+**Reply buttons** (`chatactions.go`, `src/lib/replyActions.ts`, threadbear's): an ```action block `{label, kind:
+new_thread|send, brief, chat_id?}` in a reply renders as a button (closed fences only, numbered in document order — an
+invalid block keeps its index, same in Go and TS). `chat_press_action(chatId, msgIndex, actionIndex)` — Go reads the
+**stored** reply (never client text), claims `chat_action_presses` by INSERT/CAS (runs once; a `failed` press may retry),
+applies `capabilityProblem` with the **writing** chat as caller at press time, then `spawnSubagent` (new_thread = a
+sub-agent of the writer; refused from a sub-agent) or `ChatSubmit` (send), stores `result_chat_id`, emits
+`chat-action-presses {chat_id, presses}`; `chat_action_presses` lists. Done = green ✓, click opens the thread. The
+user's next `submit` to the writer gets `[Pressed: <label>]` lines appended (once, `reported`). Rewind / clear / delete
+drop presses at ≥ the cut. iOS native: not rendered (stays a code block).
+
+**Threads already on it** (`chatsamework.go`, threadbear's sameWork): a top-level thread's **first** Claude prompt is
+compared (word overlap, `sameWorkTokens` / `sameWorkScore`, no model) with open top-level threads' title + recap + first
+prompt, same repo boosted; ≤ 3 hits ride as a **hidden** extra text block on that prompt (`claudeSend(..., hidden)` —
+never in `chat_stream`) telling the agent to `chat_read` them first, and a note row names them. Codex/ACP: not yet.
 
 **PR → worktree + chat** (`ForgePrCheckout`, `src/lib/prCheckout.ts`): optional `forge.HeadFetcher` (`FetchRef(n)` —
 GitHub/Gitea `pull/N/head`, GitLab `merge-requests/N/head`; Azure has none, `ForgeStatus.canCheckout` hides the action).
@@ -147,7 +224,7 @@ resolves them + profile (`providers`) + project `claude_config_dir` into Claude 
 Every chat's process is Go's, keyed by chat id — **all three transports** (claude-cli, Codex app-server,
 generic ACP); no mounted view needed (`spawn`, the phone, `chat_send` all work with the desktop closed).
 `chat_send` **ensures the process itself** (start from the row + resume `claude_session_id` — Go captures it
-from Claude `system/init` and from the ACP/Codex handshake; covers a send after `ReapIdle`), then sends; a
+from Claude `system/init` and from the ACP/Codex handshake; covers a send after `ReapIdle`), then sends; **`chat_warm`** = the same ensure without a send — AgentChat calls it on mounting a fresh thread (no session, no rows) so the CLI's startup overlaps typing, and `start_turn_audit`'s checkpoint is awaited inside `submit` *after* the echo; `chatSendBody` records the prompt (`chat-user`) + a running phase **before** the ensure (threadbear's startTurn), the transports skip their own record (`recordSentUserLine`), and a failed start/write emits a `turn.failed` marker so nothing waits on that turn; a
 per-chat lock makes concurrent ensures one start. Codex/ACP resolve the row's `agent_kind` as a provider
 instance (`resolveRPCLaunch`: binary, `transportArgs`, env, project `env_file` / `claude_config_dir`) and
 then push the row's model / effort / permission mode into the fresh session — the **mode fails closed**
@@ -215,8 +292,18 @@ blocked episode) — recorded in `emitChatLine` on the phase transition, deliver
 marks the child collected unless cut at 4000 chars. A notice goes ahead of the user's queued follow-ups
 (`deliveryOrder`, below). Off with `uiPrefs.subagentAutoDeliver = false` (Settings → General).
 
+**Submit door** (`chatsubmit.go`, ADR 0001 phase A): every client sends a typed message with
+`chat_submit(chatId, text, images, clientId)` → `{sent, item?}` — Go decides **under the chat lock**: settled and an
+empty queue → sent now (`chatSendLocked`), else queued + delivery kick. No client picks `chat_send` vs `chat_queue_add`
+from its phase any more (both stay on the wire, additive). Steer stays explicit (`chat_steer`, optional `clientId`). The
+`chat-user` stream line is JSON `{text, images, clientId}` (`encodeUserLine`; `decodeUserLine` still reads old plain-text
+lines — a JSON-looking prompt without `"text"` stays a prompt); the fold puts `clientId` / images on the user row
+(`ChatMessage.clientId`), and the client's **echo** is matched by it (desktop `chatProjection` adopts Go's id onto the
+echo row; iOS `settleEchoes`, text only for rows without one). The id reaches the transport's user line through
+`withSendingClientID` (held under the chat lock); `chat_queue.client_id` carries it to a delivered item.
+
 **Queued follow-ups are Go's** (`chatqueue.go`, `chatdelivery.go`): a message typed while a turn runs goes to
-SQLite `chat_queue` via `chat_queue_add` (`_list` / `_update` / `_remove` / `_reorder`; event
+SQLite `chat_queue` via `chat_submit` (or `chat_queue_add`) (`_list` / `_update` / `_remove` / `_reorder`; event
 `chat-queue-changed` = the chat's whole queue). `chatSession` only mirrors it — **no client drain**, so it
 drains with the desktop closed or the phone asleep; legacy `queued` transcript rows are migrated through
 `chat_queue_add` on hydrate. Every Go-initiated send (notices, queue, schedules) goes through one pass,
@@ -225,7 +312,11 @@ run by the 15 s sweep **and** kicked 300 ms after a turn settles (`emitChatLine`
 settled chat. Production send is `chatSendSettled` — re-checks `chatSettled` **under the chat lock**, so a
 drain racing the user's own mid-start `ChatSend` returns `errChatBusy` instead of steering. An item is claimed
 by being **deleted in the read's transaction**; a failed send re-inserts it at the head under its old id
-(5 failures park the head until edited). Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
+(5 failures park the head until edited). **`clientId`** (optional last arg of `chat_submit` / `chat_steer` / `chat_send` /
+`chat_queue_add`, `chatclientid.go` + `claimClientID`): an id already accepted for the chat (by any of them, only after
+success; a duplicate in flight waits for the first) is a no-op success with the earlier outcome — a queued one returns the
+earlier item. In memory (1 h TTL / 500 per chat), and on a miss Go checks the chat's `chat_queue` rows, last 200
+`chat-user` lines and last 200 transcript rows, so a retry across a core restart is still deduped. Steer from the queue = `chat_queue_remove` first, then `chat_steer`.
 
 **Usage-limit resume** (`chatlimit.go`): the normalizer marks a turn that failed on a usage / rate limit
 (`turn.failed{usageLimit}` — Claude's `is_error` result with the limit text or a 429, which used to read as
@@ -238,6 +329,14 @@ on the wire, cleared by any running turn. The delivery pass sends "Continue wher
 settled (`deliverLimitResume`, after notices, before the queue), claiming the row and stamping
 `limit_resumed_key` = chat:failedAt:resetAt so an episode resumes once; a still-limited chat gets **no**
 deliveries at all (each would fail on the limit).
+
+**Waiting for connection** (`chatnetresume.go`, threadbear): a `turn.failed` whose message is the network's fault
+(`isNetworkFailure`: connection error/reset, ENOTFOUND, fetch failed, stream disconnected, …; never a usage limit), and
+at startup every chat phase still `running` (`markRestartCutTurns`: interrupt + mark, the process died with the core),
+set `chats.net_wait_at` / `net_wait_reason` network|restart (read-only on the wire). The delivery pass
+(`deliverNetResume`, after the limit resume) sends one "Continue where you left off…" once the chat is settled **and**
+`netReachable` (cached TCP probe), counting `net_resume_tries` (5 → give up); any running turn clears it; AgentChat's
+banner offers Don't (`chat_net_dismiss`).
 
 **Self-management verbs** (`internal/control/verbs_self.go`, local-only, default to the caller's chat):
 `schedule` / `schedule_list` / `schedule_cancel` (`chatschedule.go`) — SQLite `chat_schedules`, a 15 s sweep
@@ -258,7 +357,12 @@ rule — `kind` once | interval (`every_min` ≥ 15) | weekly (`weekdays` + loca
 `control.NextDue(rule, now, loc)` (table-tested: DST, weekday wrap) — computed from the run, **not** the missed slot,
 so an app closed through N slots fires once on launch; a one-shot is deleted as before; 5 failed attempts skip to the
 next slot. Resume skips slots missed while paused; run-now = `due_at = now` + a delivery kick (refused while paused).
-Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
+**Check** (`check_cmd`, `scheduleCheck`): `schedule --check CMD` (verb only — `ScheduleSave` zeroes it, an edit keeps
+it; `RunCommandProblem` applies) runs CMD in the chat's cwd (≤ 1 min, in the delivery pass, once the chat is settled)
+before a run: empty output + exit 0 skips the run (last_error "check: nothing new"), output is appended to the
+message, a failing check still runs with the error. Output found is kept in `check_output` until a run carrying it is
+sent; `check_sig` (command + folder + bytes of files the command names) must match or the check is **held** (also when the
+folder is gone); a Settings edit that moves the schedule drops the check. Verbs: `schedule --every / --weekly / --new-chat`, `schedule_pause` / `_resume` / `_run_now`; wire:
 `schedule_list_all` / `schedule_save` / `schedule_set_paused` / `schedule_run_now` (Settings → Scheduled,
 `ScheduledTasksPanel.vue`).
 
@@ -278,9 +382,27 @@ Per-device and still in `config.json`: `chatActiveByWs`, `burrow.seenAt`, `chatT
 ### Chat stream ownership (`src/lib/chatSession.ts` + `src-wails/chatstream.go`)
 
 A chat's stream is owned by a **session registry keyed by chat id**, not by `AgentChat.vue`: the
-session holds transcript, turn state, blocking requests and the `claude-data-{id}` / `acp-data-{id}` /
-`acp-req-{id}` listeners, **and reduces the stream itself** (`onEvents`/`onLine`/`onAcpData`/`onAcpReq`,
-turn end, queue drain, notifications via `ChatHost` in `src/lib/chatHost.ts`). A component
+session holds the transcript window, turn state, blocking requests and the `claude-data-{id}` / `acp-data-{id}` /
+`acp-req-{id}` listeners, and reduces the **live state** of the stream (`onEvents`/`onLine`/`onAcpData`/`onAcpReq`:
+turn end, busy, pending requests, notifications via `ChatHost` in `src/lib/chatHost.ts`). **It never folds the
+transcript and never saves it** (ADR 0001 phase B2): `messages` = Go's rows, fed only by
+`load_chat_messages_page` + splices + tails + `chat_subscribe` through the pure `src/lib/transcriptSplice.ts`
+(table-tested; a row's `id` is its transcript index, which `chat_rewind` / `chat_fork` take), with the client's own
+rows interleaved at the index they happened (`mergeLocal`, negative ids, never persisted): the **echo** of a
+just-submitted prompt (gone when a splice carries a user row with its `clientId` — never by text or timer; a
+`chat_submit` → `sent:false` drops it and the QueuePanel shows the item), pending-request markers and error
+notices. `loadTranscript()` = page (its `rev`) then `chat_subscribe(sinceRev)` (closes the race); a splice whose
+`baseRev` isn't the held rev, and every socket reconnect (`onReconnect`, chat channels aren't ringed), catch up the
+same way. Go's legacy `queued` rows are hidden; the `/context` answer never becomes a row (the fold drops it, the card reads the
+live `text.delta`); an old row folded before that goes out `plumbing: true` on every read path (`isContextReportRow`,
+marked in `stubRowImages` — the one outbound-row door — and `stubChatImages` for raw pages; index kept). **What the transcript draws** (message / "Ran N commands" tool group / settled turn's "Worked" fold) is
+one pure rule, `src/lib/transcriptRows.ts` = `ios/App/Transcript.swift`, pinned for both by `fixtures/transcript-rows.json`
+(vitest + XCTest); AgentChat adds only the changed-files card and labels. **One reply** (threadbear's wait gap): a
+prompt Go sends on its own — sub-agent notice, a schedule into its chat, limit / net / restart resume, never the user's
+queue — carries `auto: {kind, label}` on its `chat-user` line (`chatSendSettled`'s `chatSender` arg → `chatRT.auto` →
+`emitUserLine`), copied onto the row by the fold; the rule draws it as a `gap` divider ("6 min later · X finished", wait
+from the rows' `at`, click = the sent text) inside the turn, whose Worked fold spans the whole chain; only a typed row
+opens a turn. Additive: no protocolRev bump; rows without `auto` render as before. A component
 `attachView(ChatViewHooks)`s on mount — scroll, question/plan draft resets, ACP selector restore, `send`
 for the drain — and `release()`s on unmount; the last view's hooks stay installed. A session is only torn
 down when **idle** (`pendingRequests` — a typed `PendingRequest` union — empty and not busy; every answer
@@ -290,25 +412,41 @@ streaming behind an unmounted view). That's what lets chat leaves render with `v
 closed**: `ChatSession` hands every ref back `Readonly` (writable `SessionState` is module-private) plus
 intents — **`send` / `restart` / `interrupt` / `clear`** (forward to `chat_*`; the one door for AgentChat,
 the queue drain via `ChatViewHooks.send`), `notice`, `suppressDoneToast`, `requestContextReport`,
-`hydrate`, … — so nothing outside can break the idle invariant. The turn clock
-(`turnStartedAt` → `turnMs`) is the session's too. Deps (`invoke`, `listen`, host) are injectable:
+`loadTranscript`, … — so nothing outside can break the idle invariant. The composer's turn clock
+(`turnStartedAt`) is the session's; `turnMs` on the row is Go's. Deps (`invoke`, `listen`, host) are injectable:
 `chatSession.test.ts` drives it **only** through that interface and fake listeners.
 
+**Splices are versioned** (ADR 0001 phase B, `chatsplice.go`): `chat-messages-changed-<id>` =
+`{baseRev, rev, fromIndex, messages, authoritative?}`, rev = the chat's `folded_ord` (kept strictly increasing); apply
+only when `baseRev ==` the held rev or `authoritative` (rewind = from the cut, clear = from 0, subscribe ring miss).
+Stream `ord` never resets (`chat_clear` is a cut to nothing; `loadMaxOrdLocked` never goes below `folded_ord`). Pure
+text growth of the streaming row is **not** a splice: `chat-tail-<id>` `{rev, index, offset, append, kind}` (offset =
+UTF-16 length before the append), ≤ 1 per 100 ms per chat, never rev'd / ringed (`notRingable`), dropped first under
+`/v2/ws` backpressure; the next splice reaches back over every row tails touched. `chat_subscribe(chatId, sinceRev)` →
+`{rev, splices, inProgress}` from a 64-splice (≤ 2 MB encoded) in-memory ring per chat, else one authoritative splice of the newest 60
+rows. `load_chat_messages_page` carries `rev`. **Images by reference** (`chatimages.go`): a user line's / note's data
+URLs go to `chat_images(chat_id, hash)` when recorded; lines and `chat_messages` hold `burrow-img:<sha256>`, splices /
+pages / `load_chat_messages` send `burrow-image://<index>/<n>` (`load_chat_image` resolves); the CLI still gets the full
+data; `chat-event` user.delta carries the stored refs; `load_chat_stream_since` stores + refs an old chat-user / chat-note line's
+inline images on the way out (provider raw lines still replay inline). Go stamps `turnMs` on a turn's
+user row at turn end and writes permission receipts (`chatreceipts.go`) on `claude_respond_control` /
+`acp_respond_permission`.
+
 Every agent line is appended to SQLite `chat_stream(chat_id, ord, kind, line)` *before* it is emitted;
-`chat_stream_state.folded_ord` records how far the frontend folded it into `chat_messages`, so a trim
-can't delete an unrendered line. `replayChatStream()` catches a chat up after restart.
+`chat_stream_state.folded_ord` records how far Go folded it into `chat_messages`, so a trim
+can't delete an unfolded line.
 
 ### Provider protocol is parsed in Go (`src-wails/providerruntime.go`)
 
 Claude stream-json and ACP JSON-RPC are parsed in **one** place (Go) and re-emitted as neutral
 `ProviderRuntimeEvent`s on `chat-event-{chatId}` (`{ord, events}`): `text.delta` · `thinking.delta` ·
 `user.delta` · `tool.started` · `tool.completed` · `turn.completed` · `turn.failed` · `session.title` ·
-`session.id` · `session.exited`. The frontend only renders (`src/lib/chatProjection.ts` → `ChatMessage[]`,
-`AgentChat.onEvents` for scroll/notify/accounting); `LoadChatEventsSince` replays the log as events.
+`session.id` · `session.exited`. Go folds them into the transcript (`chatfold.go`); clients use the events
+for live state only (`chatSession.onEvents`: busy, notify, accounting; types in `src/lib/chatProjection.ts`).
 
 **Deliberately still on the raw channel** (UI decisions, not transcript): the control/permission
 protocol, Claude `system/init`, the ACP handshake, selector replies, `serverRequest/resolved`.
-`chat_messages` is still written by the frontend.
+`chat_messages` is written by Go only — no client calls `save_chat_messages` (the desktop's last caller is gone).
 
 ### PTY / Agent phase (`src-wails/internal/agentphase`, `phasestore.go`, `phasepoll.go`)
 
@@ -325,7 +463,9 @@ a hard requirement of remote access. `XTerm.vue` has no status emits left; it on
   and emit against out-of-order writes; the whole publish tail runs under a dedicated `emitMu` (taken
   after `s.mu` is released) so the loser can't emit last. `CreatePty` `Forget`s a phase the daemon
   doesn't list — **PTY ids are reused**, so without that a fresh tab wore the old one's review dot.
-  `PhaseStore.Apply` is the **only** writer of `terminal_tabs.status`.
+  `PhaseStore.Apply` is the **only** writer of `terminal_tabs.status`. **Pruning:** the poll `Forget`s a PTY the daemon no longer
+  lists once its phase is idle, or anything not in flight a week after it last changed (`prunablePtyPhase`);
+  `DeleteChat` forgets its chats' phases; startup (`prunePhaseRows`) drops deleted chats' rows and unprefixed ids.
 - **Three inputs:** (1) persistent hooks — Claude's live in the burrow plugin's `hooks/hooks.json`
   (`hooks` key, PTY-scoped via `CLAUDE_CODE_PLUGIN_DIRS`, so chats and non-Burrow sessions never run
   them); `installStatusHooks` still merges a hook into Codex's global config non-destructively and
@@ -371,7 +511,22 @@ has focus. There is no chat state machine any more. **Receipts are shared across
 phone can't pre-read a turn; MAX, never backwards), `seen-changed` folds it into chatAttention, Terminal.vue and
 threadFeed everywhere; `seen_list` merges on boot; a snooze wake deletes the row. A permission request fires a toast + (unfocused) a native notification
 via `notifyPermission()`. The Sidebar renders chats and terminal tabs as **one**
-list, distinguished only by icon.
+list, distinguished only by icon. **States lead, projects fold:** Inbox (needs you + unread, project icon per row) and
+**Working** (was the docked shelf) sit on top as pseudo-groups; project groups start **folded** with a row count
+(`burrow.sidebar.expandedRepos`; the group holding the thread on screen opens by itself); rows are one line (recap in the
+tooltip, sub-agents as a clickable count). Cross-project groups (Inbox, Working, Pinned) show the project icon on each row;
+a finished unread turn whose end_turn said `nothing` gets a green **tick**, the blue dot means a reply to read. Docked at the
+foot: Snoozed, and **Archived** = settled + archived threads of every project, one folded sub-group per project (newest first,
+Bring back / Delete with Undo; "Archive" replaced "Settle" in the UI — a settled thread keeps its tab, an archived one
+reopens through `/ws/<ws>?chat=<id>`).
+
+**Thread attention is Go's** (`chatattention.go`, pure `chatAttentionFor`, table-tested with the old TS cases): every
+`list_chats` row carries computed `settled_since` (unix ms from which the thread is settled — 1 = snoozed / settled by
+hand, else last activity + 3 days, 0 = never: manual "active" or an end_turn that asked), `needs_you` and `said_done`
+(end_turn's needs). Clients only add the in-flight gate + their clock (`settledFor`: `!inFlight && now >= settled_since`
+— a timestamp, so the 3-day flip needs no event), the receipt and watching. TS `settledFor` and Swift
+`AppModel.settled/needsYou/quietDone` read these; never re-derive the rule. The store mirrors its own settle / unsettle /
+snooze / activity into `settledSince` optimistically (its own `chats-changed` echo is skipped).
 
 ### Control API + `burrow` CLI (`src-wails/internal/control`, `src-wails/bin/burrow`)
 
@@ -381,12 +536,26 @@ HTTP/MCP/Wails — it takes capabilities as interfaces (`Deps`). Transports:
 
 | Transport | Client | Auth | Verbs |
 |-----------|--------|------|-------|
-| loopback HTTP `POST /v1/<verb>` (hook server's port) | `burrow` CLI, `burrow-mcp` | `control.token` (0600), Bearer | all |
+| loopback HTTP `POST /v1/<verb>` (hook server's port) | `burrow` CLI, `burrow-mcp` | challenge-response over `control.token` (0600) or a caller key | all |
 | tailnet HTTP (`httpserver.go`) | mobile / PWA | device token + pairing | `ScopeRemote` only |
 | Wails bindings | desktop UI | in-process | as needed |
 
 `Scope` is a field on the verb and a verb is **local-only unless it opts in**. The registry is also
 the source of the MCP tool schemas (`/v1/_verbs`) and `burrow help`.
+
+**Loopback auth never sends the token** (`controlauth.go`, `internal/ctlauth`, threadbear's): `POST /v1/_challenge` →
+single-use nonce (30 s); the client sends `Authorization: Burrow-Proof <sn> <cn> <HMAC(key, "burrow-ctl-v1 client\n"+sn+"\n"+cn+"\n"+port)> [caller]`
+and trusts a reply only with `X-Burrow-Proof` (same, `server`) — so whoever holds the port while the core is down learns
+nothing. burrow-mcp / the UI process: `ctlauth.Client.Do`; `bin/burrow` does the HMAC in sh + `openssl dgst` (key never
+in argv, header on fd 3). Bearer still accepted, logged as deprecated, **removed after 2027-01-31**. `/hook`,
+`/session-id`, `/agent-done` carry no token and stay unauthenticated. **Caller keys:** every chat process gets
+`BURROW_CALLER_TOKEN = HMAC(token, "caller:chat:<id>")` (`addBurrowEnvForChat`, `claudechat.go`), every PTY
+`caller:pty:<id>` (`CreatePty`); stateless, the core recomputes it. A keyed call **is** that caller (`bindCaller`: a
+`parent_chat_id` / `caller_pty_id` hint that disagrees → 403). A chat key whose mode is below full-access goes through
+the pure `capabilityProblem` (`controlcaps.go`, table-tested): no spawn / permission_mode freer than its own, no detached
+spawn, no `new_chat` / `--check` schedule, and no chat_send / answer / interrupt / move / schedule on a chat that runs freer,
+on another thread's sub-agent, or close_chat beyond its own children; refusals say "ask the user". Master token = full
+authority. Ceiling: a full-access agent can read `control.token` (0600) anyway.
 
 **UI-performed verbs** (open a tab, focus a workspace, read scrollback) call `UIBridge.Do`, which emits
 `control:action` and **blocks for the frontend's ack** (`AckControlAction`, 15 s).
@@ -439,7 +608,7 @@ that reshape args.
 - **`src/runtime/transport.ts`** is the client half and the *only* place desktop and phone differ (via
   the `EndpointSource`; `boundary.test.ts` keeps `src/runtime` from importing components/stores/xterm).
   It queues pre-open calls, keeps its listener map across reconnects, asks for a fresh ticket on every attempt,
-  and **rejects queued calls rather than replaying them** on a real drop.
+  and **rejects queued calls rather than replaying them** on a real drop. **`wake()`** (remote transport only, `core.ts` `wakeOnReturn`: `visibilitychange` / `pageshow` / `online` / `focus`): down ⇒ reconnect now, skipping the backoff; "up" ⇒ a `__probe` call (any reply, `unknown_command` included, = alive), and no reply in 2.5 s ⇒ the socket is dropped without waiting for a close event iOS never sends for a backgrounded PWA.
 - **Protocol revision** (`protocolRev` / `minClientRev` in `remoteproto.go`, mirrored as `PROTOCOL_REV` /
   `MIN_SERVER_REV` in `transport.ts`): `welcome` carries `rev` + `minClientRev`; the **client** compares
   (`checkProtocolRev`; a welcome without them = rev 1). Mismatch ⇒ the transport stops for good, rejects calls and
@@ -465,6 +634,12 @@ paired browser / phone keeps the overlay; `windowed` prop = own drag strip, no �
 (**Open in window**: Sidebar tab menu, ⌘⌥O), `git` (GitPanel's pop-out). `floating` disables the zoom
 button so tiling WMs (AeroSpace's `isDialogHeuristic`) float it — Settings always, popped-out tabs when `uiPrefs.floatPopouts` (Settings → General). ⌘W / Esc are handled in
 WindowApp, **not** as native accelerators (that would eat ⌘W = close pane in the main window).
+
+**Mini chat** (`minichat.go`, `src/lib/miniChat.ts`): a project-less chat in a 420×600 floating `chat`-kind window
+(`mini=1` adds a keep-on-top pin, persisted in `burrow.miniChatOnTop`, and a New button). Doors: tray right-click menu
+(core opens it in Go), tray panel footer, Window → Mini Chat ⌘⌥M. It lives in an ordinary **Scratch** workspace on
+`<app-data>/scratch` (created on demand), so the main window lists it like any project — no `workspace_id = 0` case.
+`mini_chat(fresh)` reuses the latest unarchived top-level chat there unless `fresh`.
 
 **A popped-out leaf stays owned by the main window** (`usePopoutsStore`): its Sidebar row stays, the pane
 shows a Bring-back placeholder, and its `XTerm` stays mounted with **`frozen`** — no `resize_pty`, since two
@@ -562,12 +737,16 @@ shared and `resumeSince` is a pure function over it.
 **Not ringed** (`notRingable` in `bus.go`): `pty-data-*` and the chat channels — both high-volume *and*
 replayable from their own durable logs. One streaming turn would churn all 512 slots and make every
 reconnect a `resync`. PTY bytes resume by **byte offset** instead: the daemon numbers each PTY's
-output and keeps the last 1 MiB (`internal/ptycore/ring.go`); `pty-data-<id>` is `{off, data}`;
+output and keeps the last 1 MiB (`internal/ptycore/ring.go`); `pty-data-<id>` is `{off, data}` (data base64 since
+protocol rev 2; clients still read a rev-1 number array); `/v2/ws` negotiates permessage-deflate except on the
+desktop's own ui:ack connection;
 `src/runtime/ptyStream.ts` dedupes by offset and, on reconnect or a hole, fetches exactly the gap via
 `pty_since` (never a full replay). Gap past the ring / old daemon ⇒ the hole stays, as before.
 
 **`shell_snapshot`** (`scopeOrchRead`) is the first paint in one round trip: workspaces, tabs for
-*every* workspace, all phases, chats, and the `seq` it's current as of — **`seq` read first, before any
+*every* workspace, the phases of **live PTYs (daemon-listed) and unarchived chats only** (`snapshotKeepsPhase`; the rest
+read idle anyway and were ~90 % of the map), unarchived chats in a slim shape + an `archived_chats` count (every client
+reads chats from `list_chats`), and the `seq` it's current as of — **`seq` read first, before any
 data** (the other order loses an event for good; this order at worst repeats one). Collections marshal
 empty, never null. Deliberately excludes transcripts and scrollback.
 
@@ -577,6 +756,19 @@ at or behind its position (handlers fire sounds and OS notifications), exposes `
 unknown event names are ignored on purpose.
 
 **Binary PTY frames are deferred on purpose** — a bandwidth optimization, not a prerequisite.
+
+**Server-side terminal emulator** (`internal/ptycore/vt.go`, build tag `vt`, plan `docs/plans/010-server-side-vt.md`):
+burrow-daemon feeds every PTY's bytes through libghostty-vt as well, under the same lock as the byte ring, so
+`pty_attach` returns VT bytes that rebuild the screen + history in a fresh xterm, cut at byte `off` of the stream
+(`ptyStream.attach` continues exactly there), and `tab_output` reads `screen_text` with no window open. A daemon
+without the tag answers `pty screen unsupported` and everything falls back (UI read / start from live output).
+While a TUI holds the alt screen the primary is unreachable, so a write that leaves it emits `pty-resync-<id>` and
+a view that attached during the TUI re-attaches. The `foreground` reply also carries `alt` / `atPrompt` (OSC 133):
+the phase poll's unknown-process branch treats a marked prompt as a shell and an alt-screen TUI (vim, less) as
+`PollInteractive` — idle, never running, no review dot. **Beta/dev only:** when `pty_emulator` is true
+(`src/lib/ptyEmulator.ts`), `Terminal.vue` unmounts the XTerm of a hidden tab (the phone's rule) and a remount
+rebuilds it via `pty_attach`; stable keeps every terminal mounted. Lib: `just libghostty` (zig 0.17+) → `src-wails/third_party/`;
+beta/dev bundles only until the plan's Phase 3.
 
 ### Pairing and device tokens (`src-wails/remoteauth.go` + `remotedevices.go` + `remoteguard.go`)
 
@@ -620,14 +812,60 @@ devtools) and `ConnectView.vue`.
 
 Phone width (`compact` in `src/lib/viewport.ts`, ≤ 767 px) switches `App.vue` to the phone shell
 (`src/components/phone/`: bottom nav Threads / Project / More; Threads is `ThreadsScreen.vue` over `src/lib/threadFeed.ts` —
-the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases,
-not the mounted Terminals, since a phone mounts one workspace; the desktop Sidebar stays hidden there). A phone
+the tray panel's feed: every project's active threads grouped Needs you / Working / Unread / Recent from Go's phases
++ `needs_you` (`rowNeedsYou`: blocked phase, or not running and end_turn asked — same rule as Sidebar / iOS `needsYou`),
+not the mounted Terminals, since a phone mounts one workspace; one `shell_snapshot`, then events — phases,
+`terminal-tabs-changed {workspaceId}` (`SaveTerminalTabs`; the feed re-reads that workspace's `list_terminal_tabs`),
+`workspaces-changed`, resync, focus — and a 5 min safety re-read (was every 15 s); the desktop Sidebar stays hidden there). A phone
 **mirrors** a terminal, never resizes it: `XTerm.vue` takes the grid the desktop gave the PTY (`pty_size` /
 `pty-size-<id>`, remembered in Go by `ResizePty`/`CreatePty`, in memory) and CSS-scales it to its width — resizing to
 45 columns re-laid the Mac's TUI out; unknown size ⇒ falls back to fitting. Only the visible tab keeps an XTerm
 (each holds a replayed 1 MiB ring — the iOS WebContent kill); an iPad
 gets the full layout. Layout prefs (`LAYOUT_KEYS` in `stores/ui.ts`) stay in the browser's own
 `localStorage` (`burrow.layout.web`) so an iPad doesn't rewrite the Mac's. Read receipts are shared via Go (`seen_receipts`, above).
+
+**Offline on a paired device** (remote transport only; `remoteActive()` in `core.ts`, inert on the desktop's own backend):
+`LinkStatus.vue` (phone header, Sidebar foot) shows Reconnecting after 1.5 s down and Offline after 3 s (pure
+`src/runtime/linkStatus.ts`), tap = `wake()`. A message sent while the socket is down (or whose `chat_submit`
+fails with disconnected / transport unreachable) is **held** in localStorage `burrow.outbox.<envId>`
+(`src/lib/offline.ts`, session intents `hold` / `held` / `dropHeld`), shown in the composer as "Waiting for connection",
+and on reconnect retried through `chat_submit` with the same `clientId`, oldest first (`drainOutbox` in `src/runtime/remoteCache.ts`): removed
+only after success; a non-network refusal marks it and blocks only that chat. **Idempotent:** every typed message gets a
+`clientId` (`newClientId`), reused by `chat_submit`, the hold (= the held id) and the drain, so a
+"disconnected" call that already reached Go is safe to retry; while a chat has anything held, a new message for it is held
+behind (and the drain kicked) instead of overtaking it. A transport that **recovers from unreachable** fires
+its resync handlers (boot loads failed fast: chats, config, workspaces re-read; App.vue's `ws.load()` failure no longer
+aborts startup); `dropSocket` detaches the dead socket's handlers. **Read cache**: `invoke` tees
+`shell_snapshot` / `list_chats` / `list_workspaces` into `burrow.cache.<envId>.<cmd>`; threadFeed and the workspace /
+chat stores seed from `cachedRead()` before the live call. A cached snapshot is never `noteSeq`'d. Cleared on
+`removeEnvironment` (unpair / 401) and `switchEnvironment`; the outbox survives both.
+
+**Native iOS app** (`ios/`, SwiftUI, XcodeGen `project.yml`; separate from the older WebView shell in `src-ios/`): a
+`/v2/ws` client like the phone PWA (pair → device token in the Keychain → ticket → socket), same command table and
+events — no app-specific Go surface. Module per file: `AppModel` (snapshot, `list_chats`, phases, shared `seen_receipts`,
+Inbox/Working/Pinned/projects/Settled grouping = `settledFor` + `displayStatus`), `Requests`, `Queue`, `ComposerView`,
+`ThreadDetails`, `Terminals`, `ThreadActions`/`Archive`/`Search`. **Transcript** = `TranscriptWindow` (pure, XCTest
+`BurrowTests`: `xcodebuild test -scheme Burrow`): page (+ `rev`) → `chat_subscribe(rev)`; splices apply on `baseRev ==
+rev` or `authoritative`, `chat-tail-<id>` by UTF-16 offset on the same rev; a gap, reconnect, nudge or phase change =
+`chat_subscribe(heldRev)` (single-flight), never a page reload; the launch cache keeps `rev`. Echoes settle by `clientId`
+(text only for rows without one); widget + Live Activity (`Widgets/`) and a share
+extension (`Share/`) share data through a **Keychain access group, not an App Group** — the build signs with the team's
+wildcard dev profile (no Xcode account needed), which can't carry App Groups. `just ios-native` = unsigned build +
+`codesign` → `<app-data>/ios/Burrow.ipa`; the core serves an `itms-services` install page at `/ios`
+(`iosinstall.go`; behind a `tailscale serve` path mount the page passes its prefix as `?p=`). **Offline** (`Offline.swift`):
+a per-machine folder `<Application Support>/burrow/<sha256(baseURL)>/` holds the **outbox** (sends while the socket is
+down, sends whose reply a drop lost, and anything for a chat that already has items there — never overtaken; shown in
+the chat's QueuePanel as "Waiting for connection", delivered in order via `chat_submit` on each `open` (not after the
+snapshot), removed only after success, deletable; a refusal holds back only that chat's later items). Every user send
+carries a `clientId` (UUID; an outbox item's id), reused by every retry, so Go's dedupe makes the retry safe and the **launch cache** (snapshot + `list_chats` rows, written after a snapshot
+and on background; ≤ 20 chats × 150 messages of `load_chat_messages_page`, kept in memory per load, written on
+background) painted before the socket opens; unpair clears the cache, not the outbox. `ConnectionBanner` above the
+split view: nothing while connected, "Reconnecting…" after 1.5 s, "Offline" after 3 s; tap = `reconnect()` (skips the
+backoff). Live Activity / widget
+update only while the app holds the socket (no Live Activity pushes). **Push** (`Push.swift`): asks permission, registers,
+sends the token on every socket open; sandbox = the embedded profile's `aps-environment`; a tap opens `chat=<id>` of the
+payload's `url`. Needs `APP_PROFILE=<explicit App ID profile with Push>` for `release.sh` — the wildcard profile can't
+carry `aps-environment`, so without it the build has no push.
 
 **Release channel is decided by the serving binary, not the bundle** (`src-wails/channel.go`): `buildChannel` is
 `dev` under `wails3 dev` (`channel_dev.go`, the `dev` build tag — Taskfile `build DEV=true` passes it) and `beta` via `just build-beta`'s
@@ -667,6 +905,11 @@ row. Decided in Go on `PhaseStore.onChange` (now `prev, next`): chats + PTY tabs
 `waiting_approval`/`waiting_input`, a chat's `done` (not sub-agents, not archived), snooze wake. `pushGate`:
 none while `chat_mark_active` < 90 s ago, ≤ 1 per key per 30 s; tag/Topic per chat/tab. Chat deep link is
 `#/ws/<ws>?chat=<id>` (chat tab ids are client-side). Phone toggle: More screen. PTY tabs have no watch signal.
+**APNs** (`apns.go`) is the second delivery kind in `pushToAll`, same decisions: HTTP/2 + ES256 provider JWT (reused 50 min)
+from `<app-data>/apns.p8` + `apns.json {keyId, teamId, topic}`, read at startup, either absent = off. `apns_tokens`
+(token, device_id, sandbox) via `push_subscribe_apns(token, sandbox)` / `push_unsubscribe_apns` (calling device, `deviceArg`);
+revoke deletes them; 410 / `BadDeviceToken` / `Unregistered` / `DeviceTokenNotForTopic` delete the row. Payload: alert,
+`thread-id` = phase key, `url` = the hash route. Never logs the key or a token (transport errors drop the URL). **Currently off on iOS** (`PushDelegate.enabled = false`, no `aps-environment`): no Apple key / explicit App ID yet.
 
 **No manual GUI verification of any of this has been done.** Try first: pair a phone; kill the socket
 mid-turn; revoke a device; heavy terminal output; ESC mid-turn.
@@ -704,7 +947,7 @@ running `burrow hook`. A second `PermissionRequest` group in that array runs `bu
 A Claude tab's tool-permission prompt can be answered from Burrow (toast with Allow / Always / Deny **plus**
 a banner above that tab's xterm showing the oldest request and a `+N` counter) while the TUI prompt stays
 up. The second `PermissionRequest` hook (`burrow approve`, `timeout: 86400`) long-polls loopback
-`POST /v1/permission_request?pty_id=` (control.token auth); `permRegistry` parks it, keyed by
+`POST /v1/permission_request?pty_id=` (signed; a tab key only for its own pty); `permRegistry` parks it, keyed by
 `pty_id` + hash(`tool_name`,`tool_input`) (the payload has no `tool_use_id`), and publishes the pty's whole
 pending list as `pty-permissions` (state, not delta). **Never falls back to allow:** every path that is not an
 explicit answer — app down, any error, hook disconnect, phase leaving `waiting_approval`, `AskUserQuestion` /
@@ -717,6 +960,17 @@ lingers until Claude exits (then SIGTERM). So a request answered in the terminal
 leaving `waiting_approval` (`PhaseStore.onChange` → `permRegistry.phaseChanged`; before `waiting_approval` was
 ever observed only a turn end closes it, because the status hook races the approve hook), not by the
 disconnect.
+
+### Activity log + hang watch (`src-wails/activity.go`, `internal/control/verbs_activity.go`, `src/lib/activityLog.ts`)
+
+Threadbear's activity log. Opt-in `uiPrefs.activityLog` (Settings → General, off by default): the main window (not
+WindowApp, not a paired device) notes clicks on controls (aria-label / title / innerText ≤ 80 + surface from a selector
+map), route changes, shortcuts (keymap id, noted in `keybindings.matches`), sends (`chatSession.submit`: images count,
+mode — **never text**) and answers (`respond` kind / turn card). The **hang watch** is always on: longtask observer, else a
+250 ms timer measuring lateness (WKWebView has no longtask), stalls ≥ 1 s, ≤ 1 per 10 s, with route + last entry.
+Batched, flushed every 5 s via `activity_append` (re-encoded through `control.ActivityEntry`, unknown fields dropped,
+strings clipped) into `<app-data>/activity/YYYY-MM-DD.jsonl`; files > 30 days pruned once a day. Read by the local-only
+verb `activity [--summary] [--days N]`. Never sent anywhere.
 
 ### Agent secret requests (`src-wails/secretrequests.go`, `internal/control/verbs_secret.go`)
 
@@ -786,6 +1040,12 @@ Per-provider contracts (`generateTextJSONContext`), 180 s budget each:
   --output-schema <file> --output-last-message <file> -`. **`--output-schema` is what makes Codex answer
   in JSON at all.** Effort defaults to `low`.
 - **Gemini / OpenCode** — prose-tolerant: `extractGeneratedJSON` digs the object out.
+- **Apple** (`apple::apple::system`) — on-device Foundation Model via the **`burrow-fm`** Swift sidecar
+  (`cmd/burrow-fm/main.swift`, `swiftc` in the Taskfile, signed with the other sidecars; looked up next to
+  the executable, else `PATH`): prompt on stdin, `--schema` JSON Schema → `DynamicGenerationSchema` (guided
+  generation), `--check` = model ready. 8192-token context: a prompt > `appleMaxPromptChars` (12 000) goes
+  straight to `claude-haiku-5-5`, and any failure falls back there too (`textGenFallback`). Settings offers it
+  only when `text_gen_apple_available` (= `--check`) says so, or while it is the current choice.
 
 Every generated string passes a sanitizer (`sanitizeCommitSubject`, `sanitizePrTitle`,
 `sanitizeChatTitle`, `sanitizeBranchFragment`) — the output goes straight into `git worktree add -b`.

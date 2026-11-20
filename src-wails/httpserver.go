@@ -48,8 +48,16 @@ type HTTPServer struct {
 // to steal with a cross-origin handshake: /v2/ws authenticates with a
 // single-use ticket the page has to have been given, so an attacker's page
 // opening a socket gets a 401.
+//
+// EnableCompression negotiates permessage-deflate (RFC 7692) when the client
+// offers it (browsers and URLSessionWebSocketTask do): PTY output and JSON
+// frames shrink several-fold over a tailnet. handle() turns it back off for
+// the desktop's own loopback connection, where it is only CPU. No secret
+// values ride this socket (secret requests hand out paths), so a
+// compression-oracle attack has nothing to recover.
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:       func(r *http.Request) bool { return true },
+	EnableCompression: true,
 }
 
 func NewHTTPServer(app *App) *HTTPServer {
@@ -119,6 +127,8 @@ func (s *HTTPServer) mux() *http.ServeMux {
 	// open. They carry no data — the shell is a static bundle that then has to
 	// pair like any other client.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("/ios", s.handleIOS)
+	mux.HandleFunc("/ios/", s.handleIOS)
 	mux.HandleFunc("/", s.handleAssets)
 	return mux
 }

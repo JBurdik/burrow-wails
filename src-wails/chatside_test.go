@@ -11,7 +11,7 @@ func TestChatSideCreateClaudeForksAtLatestAndIsNotASubagent(t *testing.T) {
 	parent, _ := a.CreateChat(Chat{WorkspaceID: wsID, Title: "Plan", Transport: "claude-cli",
 		ClaudeSessionID: "sess-1", Model: "claude-haiku-x", Effort: "low", PermissionMode: "plan"})
 	// The parent is mid-turn: its process is live and must stay untouched.
-	if err := a.ChatSend(parent.ID, "long job", nil); err != nil {
+	if err := a.ChatSend(parent.ID, "long job", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -36,7 +36,7 @@ func TestChatSideCreateClaudeForksAtLatestAndIsNotASubagent(t *testing.T) {
 		t.Fatalf("want reuse of %d, got %d (%v)", side.ID, again.ID, err)
 	}
 
-	if err := a.ChatSend(side.ID, "what is X?", nil); err != nil {
+	if err := a.ChatSend(side.ID, "what is X?", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	args := fake.lastStart().args
@@ -75,7 +75,7 @@ func TestChatSideCreateCodexForksThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChatSend(side.ID, "quick q", nil); err != nil {
+	if err := a.ChatSend(side.ID, "quick q", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	o := fake.rpc.starts[len(fake.rpc.starts)-1]
@@ -83,7 +83,7 @@ func TestChatSideCreateCodexForksThread(t *testing.T) {
 		t.Fatalf("codex side start must fork thr-0: %+v", o)
 	}
 	// An ordinary Codex chat never forks.
-	if err := a.ChatSend(parent.ID, "go on", nil); err != nil {
+	if err := a.ChatSend(parent.ID, "go on", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if o := fake.rpc.starts[len(fake.rpc.starts)-1]; o.Fork {

@@ -23,10 +23,47 @@ export type ChipKind = "skill" | "command" | "file";
 export type FlatNode =
   | { kind: "text"; text: string }
   | { kind: ChipKind; name: string }
-  | { kind: "paste"; text: string };
+  | { kind: "paste"; text: string }
+  | { kind: "thread"; text: string };
 
-export function isChip(n: FlatNode): n is { kind: ChipKind; name: string } | { kind: "paste"; text: string } {
+export function isChip(n: FlatNode): n is Exclude<FlatNode, { kind: "text" }> {
   return n.kind !== "text";
+}
+
+// Another thread, referenced inline: the model (and the sent message) holds
+// the readable reference itself, so the agent knows how to read it and the
+// chip is found again by parsing — no side table, like a paste's markers.
+const THREAD_REF_RE = () => /\[thread "([^"\n]*)" — chat id (\d+), read with chat_read\]/g;
+
+/** DataTransfer type of a Sidebar thread row being dragged; the value is JSON {id, title}. */
+export const THREAD_DRAG_TYPE = "application/x-burrow-thread";
+
+/** The threadRef a THREAD_DRAG_TYPE payload stands for, or "" if it isn't one. */
+export function threadRefFromDrag(data: string | undefined): string {
+  try {
+    const { id, title } = JSON.parse(data ?? "");
+    return Number.isInteger(id) ? threadRef(id, String(title ?? "")) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** The text a thread chip stands for in the model and the sent message. */
+export function threadRef(id: number, title: string): string {
+  return `[thread "${title.replace(/"/g, "'").replace(/\s+/g, " ")}" — chat id ${id}, read with chat_read]`;
+}
+
+/** Split text into plain runs and thread references (for a sent message). */
+export function splitThreadRefs(text: string): ({ ref: false; text: string } | { ref: true; id: number; title: string })[] {
+  const out: ({ ref: false; text: string } | { ref: true; id: number; title: string })[] = [];
+  let last = 0;
+  for (const m of text.matchAll(THREAD_REF_RE())) {
+    if (m.index > last) out.push({ ref: false, text: text.slice(last, m.index) });
+    out.push({ ref: true, id: Number(m[2]), title: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ ref: false, text: text.slice(last) });
+  return out;
 }
 
 // Pasted blocks are wrapped in these invisible marker characters right inside
@@ -49,6 +86,10 @@ export function wrapPaste(text: string): string {
  */
 export const PASTE_CHIP_ICON_PATH =
   "M196,32H164.62a44,44,0,0,0-73.24,0H60A20,20,0,0,0,40,52V216a20,20,0,0,0,20,20H196a20,20,0,0,0,20-20V52A20,20,0,0,0,196,32Zm-4,180H64V56H84v8a12,12,0,0,0,12,12h64a12,12,0,0,0,12-12V56h20ZM88,132a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,132Zm0,40a12,12,0,0,1,12-12h56a12,12,0,0,1,0,24H100A12,12,0,0,1,88,172Z";
+
+/** Ph "Chat Circle" bold path data — the thread chip, in the composer and in a sent message. */
+export const THREAD_CHIP_ICON_PATH =
+  "M128,20A108,108,0,0,0,31.85,177.23L20.5,211.28a20,20,0,0,0,25.3,25.3l34.05-11.35A108,108,0,1,0,128,20Zm0,192a84,84,0,0,1-42.06-11.27,12,12,0,0,0-6-1.62,12.1,12.1,0,0,0-3.8.62l-29.79,9.93,9.93-29.79a12,12,0,0,0-1-9.81A84,84,0,1,1,128,212Z";
 
 /** How many lines a pasted block needs before it collapses into a chip. */
 export const PASTE_COLLAPSE_LINES = 4;
@@ -114,9 +155,13 @@ export function tokenize(
   const files = new Set(known.files ?? []);
   if (!text) return [];
 
-  interface Match { start: number; end: number; kind: ChipKind | "paste"; name: string }
+  interface Match { start: number; end: number; kind: ChipKind | "paste" | "thread"; name: string }
   const matches: Match[] = [];
   let m: RegExpExecArray | null;
+
+  for (const t of text.matchAll(THREAD_REF_RE())) {
+    matches.push({ start: t.index, end: t.index + t[0].length, kind: "thread", name: t[0] });
+  }
 
   const pasteRe = pasteMarkerRe();
   while ((m = pasteRe.exec(text)) !== null) {
@@ -153,7 +198,9 @@ export function tokenize(
   for (const match of matches) {
     if (match.start < last) continue; // overlapping match, first one wins
     if (match.start > last) out.push({ kind: "text", text: text.slice(last, match.start) });
-    out.push(match.kind === "paste" ? { kind: "paste", text: match.name } : { kind: match.kind, name: match.name });
+    out.push(match.kind === "paste" ? { kind: "paste", text: match.name }
+      : match.kind === "thread" ? { kind: "thread", text: match.name }
+      : { kind: match.kind, name: match.name });
     last = match.end;
   }
   if (last < text.length) out.push({ kind: "text", text: text.slice(last) });
@@ -168,6 +215,7 @@ function triggerChar(kind: ChipKind): "/" | "@" {
 /** How many characters of the MODEL this node accounts for. */
 export function nodeLength(node: FlatNode): number {
   if (node.kind === "paste") return node.text.length + 2; // + the two invisible markers
+  if (node.kind === "thread") return node.text.length;
   return isChip(node) ? node.name.length + 1 : node.text.length; // + the trigger char
 }
 
@@ -175,7 +223,7 @@ export function nodeLength(node: FlatNode): number {
 export function serializeNodes(nodes: readonly FlatNode[]): string {
   let out = "";
   for (const n of nodes) {
-    out += n.kind === "paste" ? wrapPaste(n.text) : isChip(n) ? `${triggerChar(n.kind)}${n.name}` : n.text;
+    out += n.kind === "paste" ? wrapPaste(n.text) : n.kind === "thread" ? n.text : isChip(n) ? `${triggerChar(n.kind)}${n.name}` : n.text;
   }
   return out;
 }
@@ -236,5 +284,5 @@ export function flatOffset(nodes: readonly FlatNode[], index: number, offset: nu
  * mid-session) is a different chip and needs a rebuild.
  */
 export function chipSignature(nodes: readonly FlatNode[]): string {
-  return nodes.filter(isChip).map((n) => `${n.kind}:${n.kind === "paste" ? n.text : n.name}`).join(" ");
+  return nodes.filter(isChip).map((n) => `${n.kind}:${"text" in n ? n.text : n.name}`).join(" ");
 }

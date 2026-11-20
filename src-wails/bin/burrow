@@ -62,6 +62,74 @@ _token() {
   [ -n "$BURROW_HOME_DIR" ] && cat "$BURROW_HOME_DIR/control.token" 2>/dev/null
 }
 
+# --- challenge-response (src-wails/internal/ctlauth) -------------------------
+# The key never travels: the core hands out a single-use nonce, we answer with
+# an HMAC over it, and trust a reply only once the core signed it back. A chat
+# or tab signs with its own key (BURROW_CALLER_TOKEN) — that, not the
+# BURROW_CHAT_ID it also sends, is who the core thinks is calling.
+
+# _keyset: _key + _caller for this process (else control.token, no caller).
+_keyset() {
+  _caller=""
+  if [ -n "$BURROW_CALLER_TOKEN" ] && [ -n "$BURROW_CHAT_ID" ]; then
+    _key=$BURROW_CALLER_TOKEN; _caller="chat:$BURROW_CHAT_ID"
+  elif [ -n "$BURROW_CALLER_TOKEN" ] && [ -n "$BURROW_PTY_ID" ]; then
+    _key=$BURROW_CALLER_TOKEN; _caller="pty:$BURROW_PTY_ID"
+  else
+    _key=$(_token)
+  fi
+}
+
+# _pad KEY BYTE: the hex KEY XOR BYTE, zero-padded to the 64-byte block, as
+# printf octal escapes. HMAC by hand so the key is never in an argv (ps shows
+# argv to every user): openssl only ever hashes stdin. Keys are lowercase hex.
+_pad() {
+  _k=$1; _o=""; _n=0
+  while [ -n "$_k" ]; do
+    _c=${_k%"${_k#?}"}; _k=${_k#?}
+    case $_c in
+      [0-9]) _v=$((48 + _c)) ;;
+      a) _v=97 ;; b) _v=98 ;; c) _v=99 ;; d) _v=100 ;; e) _v=101 ;; f) _v=102 ;;
+      *) return 1 ;;
+    esac
+    _v=$((_v ^ $2)); _o="$_o\\$((_v / 64))$((_v / 8 % 8))$((_v % 8))"; _n=$((_n + 1))
+  done
+  [ $_n -le 64 ] || return 1
+  while [ $_n -lt 64 ]; do _o="$_o\\$(($2 / 64))$(($2 / 8 % 8))$(($2 % 8))"; _n=$((_n + 1)); done
+  printf '%s' "$_o"
+}
+
+# _hmac KEY < message → lowercase hex HMAC-SHA256.
+_hmac() {
+  _ip=$(_pad "$1" 54) && _op=$(_pad "$1" 92) || return 1
+  { printf "$_op"; { printf "$_ip"; cat; } | openssl dgst -sha256 -binary; } |
+    openssl dgst -sha256 -r | sed 's/ .*//'
+}
+
+# _sign PORT: fetch a challenge and set _auth. 1 = nobody listening, 2 = no
+# challenge (a core older than this CLI, or no usable key).
+_sign() {
+  _ch=$(curl -s --max-time 5 -X POST "http://127.0.0.1:$1/v1/_challenge" 2>/dev/null) || return 1
+  _sn=$(printf '%s' "$_ch" | sed -n 's/.*"nonce" *: *"\([0-9a-f]*\)".*/\1/p')
+  [ -n "$_sn" ] && [ -n "$_key" ] || return 2
+  _cn=$(openssl rand -hex 32) || return 2
+  _proof=$(printf 'burrow-ctl-v1 client\n%s\n%s\n%s' "$_sn" "$_cn" "$1" | _hmac "$_key") || return 2
+  _auth="Burrow-Proof $_sn $_cn $_proof${_caller:+ $_caller}"
+}
+
+# _proven PORT PROOF: did the core sign its reply with our key?
+_proven() {
+  [ -n "$2" ] && [ "$2" = "$(printf 'burrow-ctl-v1 server\n%s\n%s\n%s' "$_sn" "$_cn" "$1" | _hmac "$_key")" ]
+}
+
+# _curl ARGS…: curl with the signed header on fd 3 (never in argv), and the
+# core's proof as the second-to-last line of the output, before the status.
+_curl() {
+  curl "$@" -K /dev/fd/3 -w '\n%header{x-burrow-proof}\n%{http_code}' 3<<_AUTH_
+header = "Authorization: $_auth"
+_AUTH_
+}
+
 # _start_core: the backend may be a separate process that quit while idle
 # (plan 009). It leaves its executable in core.exe; start it again — without
 # this terminal's per-tab BURROW_* (they would leak into every chat it spawns)
@@ -74,7 +142,7 @@ _start_core() {
   [ -x "$exe" ] || return 1
   before=$(_mtime "$BURROW_HOME_DIR/hook.port")
   env -u BURROW_PTY_ID -u BURROW_CHAT_ID -u BURROW_SESSION_DIR -u BURROW_CWD \
-    -u BURROW_HOOK_PORT -u BURROW_MOD nohup "$exe" --core >/dev/null 2>&1 &
+    -u BURROW_HOOK_PORT -u BURROW_MOD -u BURROW_CALLER_TOKEN nohup "$exe" --core >/dev/null 2>&1 &
   i=0
   while [ $i -lt 50 ]; do
     sleep 0.1
@@ -153,37 +221,63 @@ _call() {
     esac
   done
 
-  port=$(_port); token=$(_token)
-  if [ -z "$port" ] && _start_core; then port=$(_port); token=$(_token); fi
+  port=$(_port); _keyset
+  if [ -z "$port" ] && _start_core; then port=$(_port); _keyset; fi
   if [ -z "$port" ]; then
     echo "burrow: Burrow is not running (no hook.port) — start the app and retry" >&2
     exit 1
   fi
-  if [ -z "$token" ]; then
+  if [ -z "$_key" ]; then
     echo "burrow: no control token in $BURROW_HOME_DIR — is this shell running inside Burrow?" >&2
     exit 1
   fi
 
   # wait_result blocks by design (a sub-agent takes minutes), so no --max-time.
+  # Output ends with whether the core proved itself, then the status code. Runs
+  # in a $(…) subshell, so the proof is checked here, where _sn/_cn live.
   _post() {
-    curl -s -X POST "http://127.0.0.1:$port/v1/$verb" \
-      -H 'Content-Type: application/json' \
-      -H "Authorization: Bearer $token" \
-      -d "{$json}" -w '\n%{http_code}'
+    _sign "$port"
+    case $? in
+      0) ;;
+      1) printf '\n\n000'; return ;;
+      *) printf '\n\nchallenge'; return ;;
+    esac
+    _r=$(_curl -s -X POST "http://127.0.0.1:$port/v1/$verb" \
+      -H 'Content-Type: application/json' -d "{$json}")
+    printf '%s\n' "$_r" | sed '$d' | sed '$d'
+    _proven "$port" "$(printf '%s' "$_r" | sed '$d' | tail -n1)" && printf 'proven' || printf 'unproven'
+    printf '\n%s' "$(printf '%s' "$_r" | tail -n1)"
   }
   body=$(_post)
   code=$(printf '%s' "$body" | tail -n1)
+  # Nobody on the file's port, but this shell was started by a backend whose
+  # port it carries: another instance (stable vs beta share hook.port) may have
+  # rewritten the file and quit. Try ours before starting a core.
+  if [ "$code" = "000" ] && [ -n "$BURROW_HOOK_PORT" ] && [ "$BURROW_HOOK_PORT" != "$port" ]; then
+    port="$BURROW_HOOK_PORT"
+    body=$(_post)
+    code=$(printf '%s' "$body" | tail -n1)
+  fi
   if [ "$code" = "000" ] && _start_core; then # nobody listening: an idle core quit
     port=$(_port)
     body=$(_post)
     code=$(printf '%s' "$body" | tail -n1)
   fi
-  payload=$(printf '%s' "$body" | sed '$d')
+  proof=$(printf '%s' "$body" | sed '$d' | tail -n1)
+  payload=$(printf '%s' "$body" | sed '$d' | sed '$d')
 
+  case "$code" in
+    000) echo "burrow: no Burrow is listening on port $port (hook.port in $BURROW_HOME_DIR) — is the app running?" >&2; exit 1 ;;
+    challenge) echo "burrow: the app on port $port gave no auth challenge — quit Burrow completely (⌥⌘Q) and reopen it" >&2; exit 1 ;;
+    401) echo "burrow: control key rejected — restart Burrow to reissue it" >&2; exit 1 ;;
+  esac
+  if [ "$proof" != proven ]; then
+    echo "burrow: the server on port $port did not prove it is Burrow — its reply was dropped (restart Burrow)" >&2
+    exit 1
+  fi
   case "$code" in
     200) printf '%s\n' "$payload" ;;
     404) echo "burrow: unknown verb '$verb' — run 'burrow help' for the list" >&2; exit 1 ;;
-    401) echo "burrow: control token rejected — restart Burrow to reissue it" >&2; exit 1 ;;
     *)   printf '%s\n' "$payload" >&2; exit 1 ;;
   esac
 }
@@ -202,12 +296,14 @@ _skill_get() {
       *) echo "burrow skills get: unexpected argument '$1'" >&2; exit 1 ;;
     esac
   done
-  port=$(_port); token=$(_token)
-  if [ -z "$port" ] || [ -z "$token" ]; then
+  port=$(_port); _keyset
+  if [ -z "$port" ] || [ -z "$_key" ] || ! _sign "$port"; then
     echo "burrow: Burrow is not running or this shell has no control token" >&2
     exit 1
   fi
-  curl -sf "http://127.0.0.1:$port/v1/skills/burrow$query" -H "Authorization: Bearer $token" || exit 1
+  out=$(_curl -sf "http://127.0.0.1:$port/v1/skills/burrow$query") || exit 1
+  _proven "$port" "$(printf '%s' "$out" | sed '$d' | tail -n1)" || { echo "burrow: the server on port $port did not prove it is Burrow" >&2; exit 1; }
+  printf '%s\n' "$out" | sed '$d' | sed '$d'
 }
 
 case "$sub" in
@@ -284,7 +380,7 @@ _start_core() {
   [ -x "$exe" ] || return 1
   before=$(_mtime "$BURROW_HOME_DIR/hook.port")
   env -u BURROW_PTY_ID -u BURROW_CHAT_ID -u BURROW_SESSION_DIR -u BURROW_CWD \
-    -u BURROW_HOOK_PORT -u BURROW_MOD nohup "$exe" --core >/dev/null 2>&1 &
+    -u BURROW_HOOK_PORT -u BURROW_MOD -u BURROW_CALLER_TOKEN nohup "$exe" --core >/dev/null 2>&1 &
   i=0
   while [ $i -lt 50 ]; do
     sleep 0.1
@@ -493,15 +589,37 @@ except: pass
     tool=$(printf '%s' "$json" | sed -n 's/.*"tool_name"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
     # Out of v1: a question / a plan is the TUI's to answer.
     case "$tool" in ''|AskUserQuestion|ExitPlanMode) exit 0 ;; esac
-    port=$(_port); token=$(_token)
-    [ -n "$port" ] && [ -n "$token" ] || exit 0
+    port=$(_port); _keyset
+    [ -n "$port" ] && [ -n "$_key" ] && _sign "$port" || exit 0
     # No --max-time: the wait is the point. -f turns any HTTP error into an empty
-    # body; the app answers 204 for "no decision".
-    out=$(printf '%s' "$json" | curl -sf -X POST \
+    # body; the app answers 204 for "no decision". An answer counts only from a
+    # core that proved itself — anything else may be whoever holds the port.
+    out=$(printf '%s' "$json" | _curl -sf -X POST \
       "http://127.0.0.1:$port/v1/permission_request?pty_id=$BURROW_PTY_ID" \
-      -H 'Content-Type: application/json' -H "Authorization: Bearer $token" \
-      --data-binary @- 2>/dev/null) || exit 0
-    printf '%s' "$out"
+      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null) || exit 0
+    _proven "$port" "$(printf '%s' "$out" | sed '$d' | tail -n1)" || exit 0
+    printf '%s' "$(printf '%s' "$out" | sed '$d' | sed '$d')"
+    exit 0
+    ;;
+
+  end-turn-gate)
+    # burrow end-turn-gate   (internal — a Burrow chat's Claude Stop hook)
+    # A turn about to end without the end_turn tool call is sent back ONCE to
+    # make it. The second stop (stop_hook_active) always goes through, and so
+    # does every error path: this must never trap a turn. stdin = the Stop JSON.
+    [ -n "$BURROW_CHAT_ID" ] || exit 0
+    json=$(cat)
+    case "$json" in *'"stop_hook_active":true'*|*'"stop_hook_active": true'*) exit 0 ;; esac
+    port=$(_port); _keyset
+    [ -n "$port" ] && [ -n "$_key" ] && _sign "$port" || exit 0
+    out=$(_curl -sf --max-time 5 -X POST "http://127.0.0.1:$port/v1/end_turn_pending" \
+      -H 'Content-Type: application/json' \
+      -d "{\"parent_chat_id\":\"$(_esc "$BURROW_CHAT_ID")\"}" 2>/dev/null) || exit 0
+    _proven "$port" "$(printf '%s' "$out" | sed '$d' | tail -n1)" || exit 0
+    case "$out" in
+      *'"pending":true'*)
+        printf '%s' '{"decision":"block","reason":"Burrow: finish this turn by calling the end_turn tool (burrow MCP) — needs \"you\" with asks if the user must decide or do something, else needs \"nothing\" (optionally next). Then write your final reply to the user after the call (not in thinking)."}' ;;
+    esac
     exit 0
     ;;
 

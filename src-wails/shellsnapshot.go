@@ -1,6 +1,11 @@
 package main
 
-import "burrow/internal/agentphase"
+import (
+	"strconv"
+	"strings"
+
+	"burrow/internal/agentphase"
+)
 
 // ShellSnapshot is everything a client needs for its first paint, in one round
 // trip. Deliberately NOT in here: chat transcript bodies (chat_stream plus
@@ -13,7 +18,10 @@ type ShellSnapshot struct {
 	Workspaces    []Workspace                 `json:"workspaces"`
 	Tabs          map[int64][]TerminalTab     `json:"tabs"`
 	Phases        map[string]agentphase.Phase `json:"phases"`
-	Chats         []map[string]any            `json:"chats"`
+	// Unarchived chats only (no client reads this list — the stores use
+	// list_chats; it stays for the shape). Archived ones are a count.
+	Chats         []map[string]any `json:"chats"`
+	ArchivedChats int              `json:"archived_chats"`
 }
 
 // shellSnapshotAfterSeqHook runs immediately after Seq is captured, before any
@@ -45,10 +53,14 @@ func (a *App) ShellSnapshot() (ShellSnapshot, error) {
 		Chats:      []map[string]any{},
 	}
 
+	var all map[string]agentphase.Phase
 	if a.phases != nil {
-		snap.Phases = a.phases.All()
+		all = a.phases.All()
 	}
 	if a.db == nil {
+		if all != nil {
+			snap.Phases = all
+		}
 		// No database: an empty shell rather than an error. The client's first
 		// paint should show an app with nothing in it, not a failure.
 		return snap, nil
@@ -70,8 +82,50 @@ func (a *App) ShellSnapshot() (ShellSnapshot, error) {
 		snap.Tabs[w.ID] = tabs
 	}
 
-	if chats, err := a.RemoteListChats(); err == nil {
-		snap.Chats = append(snap.Chats, chats...)
+	liveChats := map[int64]bool{}
+	if chats, err := a.ListChats(); err == nil {
+		for _, c := range chats {
+			if c.ArchivedAt > 0 {
+				snap.ArchivedChats++
+				continue
+			}
+			liveChats[c.ID] = true
+			// A subset of remoteChatShape's keys: every client reads chats
+			// from list_chats, so this only names them for an old reader.
+			snap.Chats = append(snap.Chats, map[string]any{
+				"id": c.ID, "workspaceId": c.WorkspaceID, "title": c.Title,
+				"agentKind": c.AgentKind, "transport": c.Transport, "lastActivityAt": c.LastActivityAt,
+			})
+		}
+	}
+	var livePtys map[string]bool // nil = daemon unreadable: keep every pty phase
+	if a.daemon != nil {
+		if ids, err := a.daemon.List(); err == nil {
+			livePtys = make(map[string]bool, len(ids))
+			for _, id := range ids {
+				livePtys[id] = true
+			}
+		}
+	}
+	for k, p := range all {
+		if snapshotKeepsPhase(k, livePtys, liveChats) {
+			snap.Phases[k] = p
+		}
 	}
 	return snap, nil
+}
+
+// snapshotKeepsPhase: only phases a client can show — a PTY the daemon still
+// lists, a chat that exists and is not archived. Dead PTYs and archived or
+// deleted chats were ~90% of the map. A client missing a key reads idle, which
+// is what those displayed anyway.
+func snapshotKeepsPhase(key string, livePtys map[string]bool, liveChats map[int64]bool) bool {
+	if id, ok := strings.CutPrefix(key, "pty:"); ok {
+		return livePtys == nil || livePtys[id]
+	}
+	if id, ok := strings.CutPrefix(key, "chat:"); ok {
+		n, err := strconv.ParseInt(id, 10, 64)
+		return err == nil && liveChats[n]
+	}
+	return false
 }

@@ -50,6 +50,13 @@ export interface Transport {
    * Invoked immediately if that already happened. Returns an unlisten.
    */
   onIncompatible(handler: (why: Incompatible) => void): () => void;
+  /**
+   * The app came back (tab visible, page restored, network online): a socket
+   * the OS killed in the background still reads as open and only times out
+   * much later. Connect now if down; if "up", probe it and replace it when no
+   * reply comes within `WAKE_PROBE_MS`.
+   */
+  wake(): void;
   close(): void;
 }
 
@@ -60,7 +67,9 @@ export interface Transport {
  * wire change (frame tags, command names / argument shapes, event names /
  * payloads); additive changes don't count.
  */
-export const PROTOCOL_REV = 1;
+export const PROTOCOL_REV = 2;
+// Rev 2 = pty-data / pty_since bytes as base64; decodePtyChunk still reads a
+// rev-1 core's number arrays, so an older core stays usable.
 export const MIN_SERVER_REV = 1;
 
 /** "client-old": this bundle predates what the core requires (reload / restart
@@ -115,6 +124,12 @@ export const MAX_CONNECT_FAILURES = 7;
  */
 export const MAX_IN_FLIGHT = 48;
 
+/** How long a woken socket gets to answer the probe before it is replaced. */
+export const WAKE_PROBE_MS = 2500;
+// Any reply proves the socket is alive — `unknown_command` included, so the
+// probe needs no server-side verb and no protocol bump.
+const PROBE_CMD = "__probe";
+
 export function createTransport(
   getEndpoint: EndpointSource,
   opts: {
@@ -156,6 +171,10 @@ export function createTransport(
   const incompatibleHandlers = new Set<(why: Incompatible) => void>();
   let incompatible: Incompatible | null = null;
   let up = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let connecting = false;
+  let probeId = 0;
+  let probeTimer: ReturnType<typeof setTimeout> | null = null;
 
   function setState(next: boolean) {
     if (up === next) return;
@@ -201,7 +220,9 @@ export function createTransport(
   }
 
   async function connect() {
-    if (closed) return;
+    reconnectTimer = null;
+    if (closed || connecting) return;
+    connecting = true;
     // The socket construction is INSIDE this try, not just getEndpoint(): with
     // a malformed url (an empty ws_url from a backend that failed to finish
     // starting up gives `"?ticket=…"`, which is not a ws:// url) the
@@ -211,6 +232,7 @@ export function createTransport(
     try {
       // A ticket is single-use, so every attempt needs a fresh one.
       const endpoint = await getEndpoint();
+      connecting = false;
       if (closed) return;
       if (!endpoint.wsUrl) throw new Error("no websocket url");
 
@@ -219,6 +241,9 @@ export function createTransport(
       ws = socket;
 
       socket.onopen = () => {
+        // Calls made while unreachable failed fast (a cold start offline for
+        // ~15 s lost every boot load): tell the resync handlers to re-read.
+        const recovered = unreachable;
         connectFailures = 0;
         unreachable = false;
         backoff.reset();
@@ -229,10 +254,14 @@ export function createTransport(
         if (lastSeq > 0) socket.send(JSON.stringify({ t: "resume", since: lastSeq }));
         flush();
         setState(true);
+        if (recovered) for (const h of resyncHandlers) h();
       };
       socket.onmessage = (ev: MessageEvent) => handleFrame(String(ev.data));
       socket.onclose = () => {
-        if (ws === socket) ws = null;
+        // A socket wake() already replaced: its late close is not news.
+        if (ws !== socket) return;
+        ws = null;
+        clearProbe();
         setState(false);
         failPending("disconnected");
         noteConnectFailure("connection closed");
@@ -243,14 +272,59 @@ export function createTransport(
         // scheduled twice for one socket.
       };
     } catch (e) {
+      connecting = false;
       noteConnectFailure(e instanceof Error ? e.message : String(e));
       scheduleReconnect();
     }
   }
 
   function scheduleReconnect() {
+    if (closed || reconnectTimer) return;
+    reconnectTimer = setTimeout(connect, backoff.next());
+  }
+
+  function clearProbe() {
+    if (probeTimer) clearTimeout(probeTimer);
+    probeTimer = null;
+    probeId = 0;
+  }
+
+  /** Give up on the current socket without waiting for its close event. */
+  function dropSocket() {
+    const dead = ws;
+    ws = null;
+    // A slow "dead" socket can still deliver late frames: they must not be
+    // dispatched next to the replacement's.
+    if (dead) dead.onopen = dead.onmessage = dead.onclose = dead.onerror = null;
+    clearProbe();
+    setState(false);
+    failPending("disconnected");
+    try {
+      dead?.close();
+    } catch {
+      // already dead — that is the point
+    }
+    reconnectNow();
+  }
+
+  function reconnectNow() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    backoff.reset();
+    void connect();
+  }
+
+  function wake() {
     if (closed) return;
-    setTimeout(connect, backoff.next());
+    if (!ws) {
+      // Down (or waiting out a backoff of up to 10 s): try now.
+      if (!connecting) reconnectNow();
+      return;
+    }
+    if (ws.readyState !== 1 || probeId) return; // still opening / probe in flight
+    probeId = nextId++;
+    ws.send(JSON.stringify({ t: "call", id: probeId, cmd: PROBE_CMD, args: {} }));
+    probeTimer = setTimeout(dropSocket, WAKE_PROBE_MS);
   }
 
   function handleFrame(data: string) {
@@ -261,6 +335,10 @@ export function createTransport(
       return;
     }
     if (frame?.t === "reply") {
+      if (probeId && frame.id === probeId) {
+        clearProbe();
+        return;
+      }
       const p = pending.get(frame.id);
       if (!p) return;
       pending.delete(frame.id);
@@ -380,8 +458,12 @@ export function createTransport(
       return () => incompatibleHandlers.delete(handler);
     },
 
+    wake,
+
     close() {
       closed = true;
+      clearProbe();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       setState(false);
       failPending("transport closed");
       ws?.close();

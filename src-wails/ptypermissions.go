@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -286,7 +287,9 @@ func (a *App) AnswerPtyPermission(id, behavior, message string) error {
 // handlePermissionRequest is the `burrow approve` long-poll. 204 = no
 // decision (the TUI decides); only an explicit answer produces a body.
 func (a *App) handlePermissionRequest(w http.ResponseWriter, r *http.Request) {
-	if !a.controlAuthorized(r) {
+	who, ok := a.controlAuth(w, r)
+	// A tab's key parks requests for its own tab only; a chat has no TUI prompt.
+	if !ok || who.Kind == "chat" || (who.Kind == "pty" && r.URL.Query().Get("pty_id") != strconv.FormatInt(who.ID, 10)) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

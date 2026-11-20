@@ -140,7 +140,7 @@
 
     <div class="relative flex min-h-0 flex-1">
     <ThreadFindBar :messages="messages" :container="scrollEl" @reveal="revealForFind" />
-    <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
+    <div ref="scrollEl" :data-workspace-id="props.workspaceId" @scroll.passive="onScroll" @dragover="onThreadDragOver" @drop="onThreadDrop" class="chat-messages relative flex flex-1 flex-col overflow-y-auto py-6 pb-2 [scroll-behavior:smooth] [-webkit-user-select:text] [user-select:text]">
       <div class="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-0.5">
       <!-- A remount starts with no messages until the transcript is read back, which on
            a slow link (remote client) takes long enough to read as an empty conversation. -->
@@ -211,6 +211,17 @@
           </div>
         </template>
 
+        <!-- A prompt Go sent on its own (sub-agent finished, schedule, resume):
+             a thin wait line inside the turn; click to read what was sent. -->
+        <template v-else-if="msg.role === 'turn-gap'">
+          <div class="px-4 py-1">
+            <button class="flex w-full items-center gap-3 text-[11px] text-muted-foreground hover:text-foreground" :aria-expanded="!!gapOpen[msg.id]" @click="gapOpen[msg.id] = !gapOpen[msg.id]">
+              <span class="h-px flex-1 bg-border" /><span class="truncate">{{ msg.label }}</span><span class="h-px flex-1 bg-border" />
+            </button>
+            <div v-if="gapOpen[msg.id]" class="mx-auto mt-1 max-w-[720px] whitespace-pre-wrap text-[12px] text-muted-foreground">{{ msg.text }}</div>
+          </div>
+        </template>
+
         <!-- Files this turn edited: a diffstat card whose rows expand into the
              edit's own before/after lines (Ghostex-style inline diff). -->
         <template v-else-if="msg.role === 'changed-files'">
@@ -258,7 +269,7 @@
               <button class="message-copy-btn" aria-label="Edit" title="Edit — put this text back in the composer" @click="editMessage(msg)">
                 <PhPencilSimple :size="13" />
               </button>
-              <template v-if="canBranch">
+              <template v-if="canBranch && msg.id >= 0">
                 <button class="message-copy-btn" aria-label="Rewind to here" title="Rewind to here — drop this message and everything after it, then edit and resend" @click="rewindTo(msg)">
                   <PhArrowCounterClockwise :size="13" />
                 </button>
@@ -284,7 +295,7 @@
                   />
                 </template>
               </div>
-              <div class="md-body">
+              <div class="md-body" @click="onThreadChipClick">
                 <template v-for="(seg, segIdx) in userMsgSegments(msg)" :key="segIdx">
                   <PasteChip v-if="seg.paste" :text="seg.text" />
                   <span v-else v-html="renderUserMd(seg.text)" />
@@ -397,6 +408,8 @@
                 @resolve="transcriptFeedback.setResolved"
                 @follow-up="jumpToFeedback"
                 @quote="quoteIntoComposer"
+                :can-explain="!compact && !phone && sideChatAvailable"
+                @explain="explainSelection"
               >
                 <!-- eslint-disable-next-line vue/no-v-html -->
                 <div class="md-body" v-html="renderAssistantMd(msg)" @click="onRichBlockClick" />
@@ -415,9 +428,9 @@
         </template>
       </div>
 
-      <!-- Working line (Ghostex-style): a slowly spinning spark, a playful verb, the clock. -->
+      <!-- Working line: a running dachshund, a playful verb, the clock. -->
       <div v-if="busy" class="flex items-center gap-2 px-4 py-2">
-        <PhSparkle :size="15" weight="fill" class="working-spark" />
+        <span class="working-dog" aria-hidden="true" />
         <span class="text-[13px] text-secondary-foreground">{{ workingVerb }}…</span>
         <span class="text-[12px] tabular-nums text-muted-foreground">{{ workingElapsed }}</span>
       </div>
@@ -431,11 +444,20 @@
         <button v-if="!usageLimit.armed" class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_arm')">Resume automatically</button>
         <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="limitAction('chat_limit_dismiss')">{{ usageLimit.armed ? 'Cancel' : 'Dismiss' }}</button>
       </div>
+      <!-- Waiting for connection (src-wails/chatnetresume.go): the network or a
+           restart cut the last turn; it carries on by itself once back. -->
+      <div v-if="activeSession?.netWaitAt && !busy" class="mx-4 my-2 flex items-center gap-2 rounded-lg border border-border bg-hover px-3 py-1.5 text-[11px] text-muted-foreground">
+        <PhWifiSlash :size="13" weight="bold" class="flex-shrink-0" />
+        <span class="flex-1 truncate">
+          {{ activeSession.netWaitReason === 'restart' ? 'Burrow restarted mid-turn' : 'Waiting for connection' }} — carries on by itself
+        </span>
+        <button class="flex-shrink-0 font-medium text-foreground hover:underline" @click="netDismiss">Don't</button>
+      </div>
       </div>
     </div>
     <!-- Minimap (after Ghostex): one dash per prompt you sent, longer for
          longer prompts; hover previews it, click jumps to it. -->
-    <div v-if="minimapPrompts.length >= 2" class="minimap-rail" @mouseleave="minimapHover = null">
+    <div v-if="!phone && minimapPrompts.length >= 2" class="minimap-rail" @mouseleave="minimapHover = null">
       <button
         v-for="(p, i) in minimapPrompts"
         :key="p.id"
@@ -478,6 +500,18 @@
         <button class="flex-shrink-0 text-muted-foreground hover:text-foreground" title="Dismiss" @click="branchBannerDismissed = true"><PhX :size="11" weight="bold" /></button>
       </div>
       <SecretRequestCard :owner-key="`chat:${chatId}`" />
+      <TurnNeedsCard
+        v-if="turnNeeds"
+        :needs="turnNeeds"
+        :chat-id="chatId"
+        :archived="!!activeSession?.archivedAt"
+        :composer-text="inputText"
+        :composer-images="pendingImages"
+        :cwd="cwd"
+        @sent="inputText = ''; pendingImages = []"
+        @archive="archiveFromCard"
+        @open-chat="openSubagentFromTranscript"
+      />
       <div v-if="catchUp.open" class="catchup-card mb-2">
         <div class="flex items-center gap-2">
           <PhSparkle :size="14" class="text-foreground" />
@@ -530,7 +564,7 @@
         <!-- Queued follow-ups live inside the composer (Ghostex-style): one row
              each, drag to reorder, play = interrupt and send now, pencil = take
              it back into the input. -->
-        <div v-if="messageQueue.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
+        <div v-if="messageQueue.length || held.length" class="flex flex-col gap-1.5 px-2.5 pt-2.5">
           <div v-if="messageQueue.length > 1" class="flex items-center gap-2 text-[11px] text-muted-foreground">
             <button v-if="messageQueue.length > 3" class="queue-act" style="width:auto;padding:0 6px" :title="queueCollapsed ? 'Expand queued messages' : 'Collapse queued messages'" @click="queueCollapsed = !queueCollapsed">
               <component :is="queueCollapsed ? PhCaretRight : PhCaretDown" :size="11" /><span class="ml-1">{{ messageQueue.length }} queued</span>
@@ -570,6 +604,18 @@
             <button class="queue-act" title="Remove from queue" @click="removeQueued(q.id)"><PhX :size="12" /></button>
           </div>
           </template>
+          <!-- Typed while a paired device was offline: kept on this device and
+               handed to Go's queue on reconnect (src/lib/offline.ts). -->
+          <div
+            v-for="h in held"
+            :key="h.id"
+            class="queue-row flex items-center gap-2 rounded-[9px] border border-dashed border-border px-2.5 py-1.5 text-[13px] text-secondary-foreground"
+          >
+            <PhClock :size="13" class="flex-shrink-0 text-muted-foreground" />
+            <span class="min-w-0 flex-1 truncate">{{ h.text }}</span>
+            <span class="flex-shrink-0 text-[11px]" :class="h.error ? 'text-destructive' : 'text-muted-foreground'" :title="h.error">{{ h.error ? "Not delivered" : "Waiting for connection" }}</span>
+            <button class="queue-act" title="Delete this message" @click="S.dropHeld(h.id)"><PhX :size="12" /></button>
+          </div>
         </div>
         <!-- Working indicator — sits above the textarea, only for tool activity.
              Thinking has its own bubble in the chat body, so it's not duplicated here. -->
@@ -579,27 +625,26 @@
         </div>
         <!-- AskUserQuestion: one question at a time, stepped, above the textarea -->
         <div v-if="pendingQuestion && activeQuestion" class="question-panel perm-slide-in border-b border-border bg-[color-mix(in_srgb,var(--chat-info)_4%,transparent)] px-3.5 py-3">
-          <div class="mb-2 flex items-center gap-2">
-            <span v-if="activeQuestion.header" class="rounded bg-[color-mix(in_srgb,var(--chat-info)_22%,transparent)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.04em] text-[var(--chat-info)]">{{ activeQuestion.header }}</span>
-            <span v-if="questionSpecs.length > 1" class="ml-auto flex h-5 flex-shrink-0 items-center rounded-md bg-hover px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
+          <div class="cq-title mb-1">
+            <span v-if="activeQuestion.header" class="cq-header">{{ activeQuestion.header }}</span>
+            <span class="min-w-0 flex-1">{{ activeQuestion.question }}</span>
+            <span v-if="questionSpecs.length > 1" class="flex h-5 flex-shrink-0 items-center rounded-md bg-hover px-1.5 text-[10px] font-medium tabular-nums text-secondary-foreground">{{ activeQuestionIndex + 1 }}/{{ questionSpecs.length }}</span>
           </div>
-          <p class="mb-1 text-[13px] font-semibold text-foreground">{{ activeQuestion.question }}</p>
           <p v-if="activeQuestion.multiSelect" class="mb-1.5 text-[10.5px] text-secondary-foreground/70">Select one or more options.</p>
           <div class="mt-1.5 flex flex-col gap-1.5">
+            <!-- Same option cards as the in-transcript ```questions form (chat-blocks.css) -->
             <button
               v-for="(opt, oi) in activeQuestion.options"
               :key="oi"
               type="button"
-              class="question-opt flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-[7px] text-left transition-colors"
-              :class="isPicked(activeQuestion.question, opt.label)
-                ? 'border-[var(--chat-info)] bg-[color-mix(in_srgb,var(--chat-info)_16%,var(--bg-base))]'
-                : 'border-border bg-base hover:border-[color-mix(in_srgb,var(--chat-info)_55%,transparent)]'"
+              class="cq-opt question-opt !flex-row items-center gap-2"
+              :aria-pressed="isPicked(activeQuestion.question, opt.label)"
               :disabled="nativeControlResponsePending"
               @click="selectQuestionOption(opt.label)"
             >
               <span class="flex min-w-0 flex-1 flex-col gap-px">
-                <span class="text-xs font-semibold text-foreground">{{ opt.label }}</span>
-                <span v-if="opt.description" class="text-[10px] text-secondary-foreground">{{ opt.description }}</span>
+                <span class="cq-label">{{ optionLabel(opt.label).text }}<span v-if="optionLabel(opt.label).recommended" class="cq-rec">Recommended</span></span>
+                <span v-if="opt.description" class="cq-desc">{{ opt.description }}</span>
               </span>
               <PhCheck v-if="isPicked(activeQuestion.question, opt.label)" :size="13" weight="bold" class="flex-shrink-0 text-[var(--chat-info)]" />
               <kbd v-else-if="oi < 9" class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border border-border text-[10px] text-secondary-foreground/60">{{ oi + 1 }}</kbd>
@@ -657,7 +702,13 @@
             <input ref="imagePicker" type="file" accept="image/*" multiple hidden @change="onPickImages" />
             <button class="composer-pill" :class="{ 'text-foreground': phoneSettingsOpen }" title="Model and permissions" @click="phoneSettingsOpen = !phoneSettingsOpen"><PhSlidersHorizontal :size="16" /></button>
           </template>
-          <div v-show="!phone || phoneSettingsOpen" class="composer-pillbar">
+          <!-- Phone: the pills open in a bottom sheet instead of wrapping inside the composer. -->
+          <component
+            :is="phone ? PhoneSheet : SlotOnly"
+            v-if="!phone || phoneSettingsOpen"
+            v-bind="phone ? { title: 'Model and permissions', onClose: () => (phoneSettingsOpen = false) } : {}"
+          >
+          <div class="composer-pillbar" :class="{ 'phone-launch': phone }">
             <button
               v-if="editorCtx.selection"
               class="composer-pill"
@@ -732,8 +783,9 @@
               @select="acpSelectMode"
             />
           </div>
+          </component>
 
-          <span v-if="phone && !phoneSettingsOpen" class="flex-1" />
+          <span v-if="phone" class="flex-1" />
           <!-- Right: cost badge + abort/send -->
           <div class="composer-sendgroup">
             <ComposerStash ref="stashEl" v-model:text="inputText" v-model:images="pendingImages" />
@@ -790,6 +842,12 @@
               </HoverCardPortal>
             </HoverCardRoot>
             <span v-if="sessionCost > 0 && !busy" class="px-1 font-mono text-[10px] text-muted-foreground">${{ sessionCost.toFixed(4) }}</span>
+            <!-- While a turn runs: queue it for the turn's end, or steer it in now.
+                 Without these a phone (Enter = newline) had only Stop. -->
+            <template v-if="busy && inputText.trim()">
+              <button v-if="steerable" class="composer-send" title="Steer: deliver into the running turn now (⌘↵)" @click="steerNow"><PhArrowRight :size="14" weight="bold" /></button>
+              <button class="composer-send" title="Queue: send when this turn ends (↵)" @click="sendMessage()"><PhArrowUp :size="14" weight="bold" /></button>
+            </template>
             <button
               v-if="busy"
               class="composer-send composer-send-abort"
@@ -826,21 +884,33 @@
     </div><!-- end .chat-main -->
 
     <HtmlPageModal v-if="pageView" v-bind="pageView" @close="pageView = null" />
+    <Teleport v-if="optionsView" to="body">
+      <div class="fixed inset-0 z-[1000] flex flex-col bg-[var(--terminal-bg)] pt-[env(safe-area-inset-top)]">
+        <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-[13px] font-semibold">
+          <span class="min-w-0 flex-1 truncate">{{ optionsView.spec.question || "Compare options" }}</span>
+          <button class="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground" aria-label="Close" @click="optionsView = null"><PhX :size="16" /></button>
+        </div>
+        <OptionsCompare class="min-h-0 flex-1" :spec="optionsView.spec" :cwd="cwd" :start="optionsView.start" :answered="optionsView.answered" @close="optionsView = null" @send="sendOptionsReply" />
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject } from "vue";
-import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode } from "@phosphor-icons/vue";
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, onUpdated, watch, inject, type Slots } from "vue";
+import { PhArrowDown, PhArrowUp, PhWrench, PhStop, PhShieldWarning, PhShieldCheck, PhPencilSimple, PhGitDiff, PhGitBranch, PhListChecks, PhTextAa, PhCaretDown, PhCaretRight, PhX, PhUserGear, PhSparkle, PhFastForward, PhFileText, PhTerminalWindow, PhMagnifyingGlass, PhGlobe, PhRobot, PhWarningCircle, PhCopy, PhCheck, PhImage, PhPlay, PhDotsSixVertical, PhArrowSquareOut, PhUsersThree, PhArrowCounterClockwise, PhGitFork, PhMoon, PhPaperclip, PhSlidersHorizontal, PhArrowRight, PhFileCode, PhWifiSlash, PhClock } from "@phosphor-icons/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useFileDrop, appendRef } from "@/lib/useFileDrop";
-import { compact as phone } from "@/lib/viewport";
+import { compact as phone, isWeb } from "@/lib/viewport";
+import PhoneSheet from "@/components/phone/PhoneSheet.vue";
+// Renders its slot with no element: the desk composer's pillbar stays where it was.
+const SlotOnly = (_: unknown, { slots }: { slots: Slots }) => slots.default?.();
 import { listen } from "@tauri-apps/api/event";
 import type { Phase } from "@/runtime/displayStatus";
 import { chatAsleep, useClaudeChatsStore } from "@/stores/claudeChats";
 import { childrenOf } from "@/stores/chatTree";
 import { canSideChat } from "@/stores/chatTree";
-import { newSideChat } from "@/lib/sideChat";
+import { explainInSideChat, newSideChat } from "@/lib/sideChat";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import { useChatAttentionStore } from "@/stores/chatAttention";
 import { visitWatermark } from "@/lib/visitWatermark";
@@ -854,10 +924,15 @@ import { agentIconComp } from "@/lib/agentIcons";
 import { HoverCardRoot, HoverCardTrigger, HoverCardPortal, HoverCardContent } from "reka-ui";
 import ModelPicker, { type PickerSetting } from "@/components/ModelPicker.vue";
 import ComposerTextInput from "@/components/ComposerTextInput.vue";
+import { router } from "@/router";
 import { promptHistory, recalling, stepPromptHistory, type PromptHistoryPos } from "@/lib/composerPromptHistory";
-import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments } from "@/lib/composerDom";
+import { stripPasteMarkers, hasPasteMarkers, splitPasteSegments, splitThreadRefs, THREAD_DRAG_TYPE, threadRefFromDrag } from "@/lib/composerDom";
 import PasteChip from "@/components/composer/PasteChip.vue";
 import SecretRequestCard from "@/components/SecretRequestCard.vue";
+import TurnNeedsCard from "@/components/TurnNeedsCard.vue";
+import { isCommandTool, isVisibleRow, toolGroupLabel as groupLabel, transcriptRows } from "@/lib/transcriptRows";
+import { panelTerminals } from "@/lib/rpTerminals";
+import { useNotificationsStore } from "@/stores/notifications";
 import ThreadFindBar from "@/components/ThreadFindBar.vue";
 import ComposerSuggestions from "@/components/composer/ComposerSuggestions.vue";
 import ComposerImages from "@/components/composer/ComposerImages.vue";
@@ -867,7 +942,8 @@ import ComposerPill, { type ComposerPillItem } from "@/components/composer/Compo
 import { useComposerCompletion } from "@/lib/composerCompletion";
 import CodexUserInputPanel from "@/components/CodexUserInputPanel.vue";
 import { isImageStub } from "@/lib/chatImages";
-import { chatSession, canSteer, replayChatStream, TRANSCRIPT_PAGE, type ChatMessagesPage } from "@/lib/chatSession";
+import { chatSession, canSteer } from "@/lib/chatSession";
+import { linkDown } from "@/lib/offline";
 import { setLaunchSettings, type LaunchSettingsPatch } from "@/lib/chatRuntime";
 import type { ChatMessage, QueuedChatMessage } from "@/lib/chatTypes";
 import { acpOption } from "@/lib/chatTypes";
@@ -879,16 +955,20 @@ import { useUIStore } from "@/stores/ui";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { IMAGE_MIME, escapeHtml, formatAnswers, renderChatMd } from "@/lib/chatBlocks";
+import { pressKey, withActions, type ActionPress } from "@/lib/replyActions";
 import { linkifyFileRefs } from "@/lib/localLink";
 import { cachedMermaid, renderMermaid } from "@/lib/mermaidRender";
 import { useDiagram } from "@/composables/useDiagram";
 import HtmlPageModal from "./HtmlPageModal.vue";
+import OptionsCompare from "./OptionsCompare.vue";
+import { parseOptions, type OptionsSpec } from "@/lib/optionsBlock";
+import { canOpenWindows, openWindow } from "@/lib/windows";
+import { inlineLocalAssets } from "@/lib/htmlInline";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage } from "@/lib/config";
 import {
-  getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
+  getAcpCapabilities, getAcpChatSetting, getLastAcpSetting, rpcLaunchSeed,
   setAcpCapabilities, setAcpChatSetting, type AcpChatSettings,
 } from "@/lib/acpSettings";
-import { smartTitle, isDefaultTitle } from "@/lib/chatTitle";
 import TranscriptComments from "./review/TranscriptComments.vue";
 import TranscriptFeedbackBar from "./review/TranscriptFeedbackBar.vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
@@ -911,13 +991,59 @@ const answeredMsgIds = computed(() => {
   return ids;
 });
 function renderAssistantMd(msg: ChatMessage): string {
-  return DOMPurify.sanitize(linkifyFileRefs(renderChatMd(msg.text, answeredMsgIds.value.has(msg.id))));
+  const md = () => renderChatMd(msg.text, answeredMsgIds.value.has(msg.id));
+  // ```action buttons need the row's transcript index (Go's id); a local row has none.
+  const html = msg.id >= 0 ? withActions(msg.id, actionPresses.value, chatTitleOf, md) : md();
+  return DOMPurify.sanitize(linkifyFileRefs(html));
+}
+
+// Reply buttons (replyActions.ts, src-wails/chatactions.go): press state is Go's,
+// read once per chat and kept current by chat-action-presses.
+const actionPresses = ref(new Map<string, ActionPress>());
+function setActionPresses(list: ActionPress[] | null | undefined) {
+  actionPresses.value = new Map((list ?? []).map((p) => [pressKey(p.msg_index, p.action_index), p]));
+}
+watch(() => props.chatId, (id) => {
+  void invoke<ActionPress[]>("chat_action_presses", { chatId: id }).then(setActionPresses, () => {});
+}, { immediate: true });
+let offActionPresses: (() => void) | undefined;
+let actionPressesUnmounted = false;
+void listen<{ chat_id: number; presses: ActionPress[] }>("chat-action-presses", (e) => {
+  if (e.payload?.chat_id === props.chatId) setActionPresses(e.payload.presses);
+}).then((un) => { if (actionPressesUnmounted) un(); else offActionPresses = un; });
+onBeforeUnmount(() => { actionPressesUnmounted = true; offActionPresses?.(); });
+function chatTitleOf(id: number): string {
+  return chats.sessions.find((s) => s.id === id)?.title ?? "";
+}
+async function pressAction(btn: HTMLButtonElement) {
+  const result = Number(btn.dataset.caResult);
+  if (btn.classList.contains("ca-done")) {
+    if (!result) return;
+    if (btn.dataset.caKind === "new_thread") openSubagentFromTranscript(result);
+    else {
+      const ws = chats.sessions.find((s) => s.id === result)?.workspaceId;
+      if (ws != null) void router.push({ path: `/ws/${ws}`, query: { chat: String(result) } });
+    }
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await invoke("chat_press_action", {
+      chatId: props.chatId, msgIndex: Number(btn.dataset.caMsg), actionIndex: Number(btn.dataset.caIndex),
+    });
+  } catch (e) {
+    S.notice(`Button failed: ${e}`);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // The questions form is v-html, so its clicks are delegated: selection state
 // lives in the DOM (aria-pressed) until Send reads it back.
 function onRichBlockClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
+  const ca = target.closest<HTMLButtonElement>("button.ca");
+  if (ca) { if (!ca.disabled) void pressAction(ca); return; }
   const cm = target.closest<HTMLElement>("[data-cm-action]");
   if (cm) {
     const src = decodeURIComponent(cm.closest<HTMLElement>(".cm-mermaid")?.dataset.mermaidSrc ?? "");
@@ -925,11 +1051,15 @@ function onRichBlockClick(event: MouseEvent) {
     else void navigator.clipboard.writeText(src);
     return;
   }
+  const sh = target.closest<HTMLElement>("[data-sh-action]");
+  if (sh) { void runShellBlock(sh); return; }
   const ch = target.closest<HTMLElement>("[data-ch-action]");
   if (ch) {
     pageView.value = { title: "HTML preview", path: "", html: decodeURIComponent(ch.closest<HTMLElement>(".cm-html")?.dataset.htmlSrc ?? "") };
     return;
   }
+  const coOpen = target.closest<HTMLElement>("[data-co-open]");
+  if (coOpen) { openOptions(coOpen); return; }
   const img = target.closest<HTMLImageElement>("img[data-cv-image]");
   if (img?.src) { showImage(img.src); return; }
   const page = target.closest<HTMLElement>("[data-cv-page]");
@@ -954,6 +1084,20 @@ function onRichBlockClick(event: MouseEvent) {
   const notes = skip ? "" : form.querySelector<HTMLTextAreaElement>(".cq-notes")?.value ?? "";
   form.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea").forEach((el) => (el.disabled = true));
   void sendMessage(formatAnswers(answers, notes));
+}
+
+// ▶ Run in terminal on a ```bash block: typed at the Right Panel terminal's
+// prompt, never run — the user presses Return. A busy shell (or a panel that
+// can't type, e.g. popped out) gets it on the clipboard instead.
+async function runShellBlock(btn: HTMLElement) {
+  const src = decodeURIComponent(btn.closest<HTMLElement>(".cm-shell")?.dataset.shellSrc ?? "");
+  if (!src) return;
+  const typed = btn.dataset.shAction === "run" ? await panelTerminals()?.typeInto?.(src).catch(() => false) : false;
+  if (typed) return;
+  await navigator.clipboard.writeText(src).catch(() => {});
+  const label = btn.textContent;
+  btn.textContent = btn.dataset.shAction === "run" ? "Copied — paste it in a terminal" : "Copied";
+  setTimeout(() => (btn.textContent = label), 1600);
 }
 
 // ```mermaid blocks arrive as placeholders (a plain code block carrying the
@@ -1007,6 +1151,29 @@ watch(() => [useUIStore().theme, useUIStore().themeMode], () => nextTick(() => {
   hydrateMermaid();
 }));
 
+// ```options cards: Compare opens OptionsCompare in its own window; on the
+// phone (no native windows) a full-screen overlay. Send = sendMessage.
+const optionsView = ref<{ spec: OptionsSpec; start: number; answered: boolean } | null>(null);
+function openOptions(btn: HTMLElement) {
+  const card = btn.closest<HTMLElement>("[data-chat-options]");
+  const raw = decodeURIComponent(card?.dataset.chatOptions ?? "");
+  const spec = parseOptions(raw);
+  if (!spec) return;
+  const start = Number(btn.dataset.coOpen ?? 0);
+  const answered = card?.dataset.coAnswered === "1";
+  if (!canOpenWindows()) { optionsView.value = { spec, start, answered }; return; }
+  let hash = 0;
+  for (const c of raw) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  const title = spec.question || "Compare options";
+  const q = new URLSearchParams({ chat: String(props.chatId), cwd: props.cwd, spec: raw, start: String(start), title, ...(answered ? { answered: "1" } : {}) });
+  void openWindow(`options:${props.chatId}:${hash >>> 0}`, `/window/options/0?${q}`, title, 1200, 800);
+}
+
+function sendOptionsReply(text: string) {
+  optionsView.value = null;
+  void sendMessage(text);
+}
+
 // Page cards (```visual {"page": …}): the agent's HTML file opens in a
 // sandboxed iframe modal, never inline in the transcript.
 const pageView = ref<{ title: string; path: string; html: string } | null>(null);
@@ -1014,7 +1181,11 @@ async function openPage(path: string, title: string) {
   const abs = path.startsWith("/") ? path : `${props.cwd}/${path}`;
   let html: string;
   try {
-    html = await invoke<string>("read_text_file_checked", { path: abs });
+    html = await inlineLocalAssets(
+      await invoke<string>("read_text_file_checked", { path: abs }), abs,
+      (p) => invoke<string>("read_text_file", { path: p }),
+      (p) => invoke<string>("read_file_base64", { path: p }),
+    );
   } catch (e) {
     html = `<p style="font:13px system-ui;color:#b91c1c;padding:16px">Could not read ${escapeHtml(abs)}: ${escapeHtml(e)}</p>`;
   }
@@ -1038,7 +1209,52 @@ function userMsgSegments(msg: ChatMessage) {
 // every message, whatever the role, through the same markdown formatter).
 function renderUserMd(text: string): string {
   const html = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }) as string);
-  return pillifyMentions(html);
+  return chipThreadRefs(pillifyMentions(html));
+}
+
+// A thread reference (threadRef in composerDom.ts) → a chip with its title;
+// clicking it opens that thread. Same text-node walk as the mentions.
+function chipThreadRefs(html: string): string {
+  if (!html.includes("[thread ")) return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const targets: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n as Text).data.includes("[thread ")) targets.push(n as Text);
+  for (const node of targets) {
+    const parts = splitThreadRefs(node.data);
+    if (!parts.some((p) => p.ref)) continue;
+    const frag = doc.createDocumentFragment();
+    for (const p of parts) {
+      if (!p.ref) { frag.append(doc.createTextNode(p.text)); continue; }
+      const chip = doc.createElement("span");
+      chip.className = "mention-pill thread-chip";
+      chip.dataset.chatId = String(p.id);
+      chip.title = "Open this thread";
+      chip.textContent = p.title || `Thread ${p.id}`;
+      frag.append(chip);
+    }
+    node.replaceWith(frag);
+  }
+  return doc.body.innerHTML;
+}
+
+function onThreadChipClick(e: MouseEvent) {
+  const id = Number((e.target as HTMLElement).closest<HTMLElement>(".thread-chip")?.dataset.chatId);
+  const ws = id ? chats.sessions.find((s) => s.id === id)?.workspaceId : undefined;
+  if (ws != null) void router.push({ path: `/ws/${ws}`, query: { chat: String(id) } });
+}
+
+// A thread row dragged from the Sidebar (THREAD_DRAG_TYPE) onto the transcript
+// goes into the composer at its caret; the composer handles a drop on itself.
+function onThreadDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes(THREAD_DRAG_TYPE)) e.preventDefault();
+}
+function onThreadDrop(e: DragEvent) {
+  const ref = threadRefFromDrag(e.dataTransfer?.getData(THREAD_DRAG_TYPE));
+  if (!ref) return;
+  e.preventDefault();
+  inputEl.value?.insertText(ref);
+  inputEl.value?.focus();
 }
 
 // `@path` → pill. Done as a DOM walk over the ALREADY-sanitized output instead
@@ -1165,6 +1381,9 @@ const chatBranch = computed(() => chatWorkspace.value?.worktree_branch || git.br
 // Branch-changed banner: the branch a chat was created on (session.branch,
 // a one-time snapshot) vs. the workspace's current branch.
 const activeSession = computed(() => chats.sessions.find((s) => s.id === props.chatId));
+// The last turn's end_turn, shown once the turn has settled (a running turn's
+// call is for the answer it is still writing).
+const turnNeeds = computed(() => (busy.value ? undefined : activeSession.value?.turnNeeds));
 const branchChanged = computed(() => {
   const created = activeSession.value?.branch;
   return !!created && created !== chatBranch.value;
@@ -1180,6 +1399,10 @@ const usageLimit = computed(() => {
   const label = d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
   return { label, armed: !!activeSession.value?.limitResumeAt };
 });
+async function netDismiss() {
+  await invoke("chat_net_dismiss", { chatId: props.chatId }).catch((e) => S.notice(`Could not cancel: ${e}`));
+  await chats.reload();
+}
 async function limitAction(cmd: "chat_limit_arm" | "chat_limit_dismiss") {
   try {
     await invoke(cmd, { chatId: props.chatId });
@@ -1225,6 +1448,10 @@ const effectiveTransport = computed<ChatTransport>(() =>
 const usesRpcRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
 // Steer (chat_steer): a queued follow-up delivered into the running turn.
 const steerable = computed(() => busy.value && canSteer(effectiveTransport.value));
+/** Queue it, then steer the queued item into the running turn (chat_steer). */
+function steerNow() {
+  void sendMessage().then((r) => { if (r?.queued) void S.steer(r.id); });
+}
 // Codex's app-server bridge reports the same modes/configOptions shape, so
 // everything ACP-flavoured (effort, mode, history) applies to it too.
 const isAcpRuntime = computed(() => effectiveTransport.value !== 'claude-cli');
@@ -1248,8 +1475,8 @@ const {
   permissionResponsePending, codexUserInput, codexUserInputPending,
   nativeControlResponsePending,
   contextTokens, contextWindow, contextSplit, contextReport, contextReportPending,
-  claudeGeneratedTitle,
-  enqueueMessage, removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
+  removeQueuedMessage, editQueuedMessage, clearQueuedMessages, moveQueuedMessage,
+  held,
 } = S;
 // ExitPlanMode arrives as a permission request with the plan in rawInput.plan.
 const acpPermPlan = computed(() => {
@@ -1410,7 +1637,7 @@ async function persistLaunch(patch: LaunchSettingsPatch) {
     S.notice(`Couldn't save the chat settings: ${e}`);
   });
 }
-function seedLaunchRow() {
+async function seedLaunchRow() {
   const row = chatRow();
   if (!row) return;
   const patch: LaunchSettingsPatch = { row_only: true };
@@ -1418,7 +1645,14 @@ function seedLaunchRow() {
   if (!row.effort) patch.effort = selectedEffort.value;
   if (!row.permissionMode) patch.permission_mode = permMode.value;
   if (!row.profileId && selectedProfileId.value) patch.profile_id = selectedProfileId.value;
-  if (Object.keys(patch).length > 1) void persistLaunch(patch);
+  if (Object.keys(patch).length > 1) return persistLaunch(patch);
+}
+// Codex / ACP twin: pins the welcome composer's picks on a fresh row before the
+// first send (rpcLaunchSeed in lib/acpSettings.ts says why).
+async function seedRpcLaunchRow() {
+  const row = chatRow();
+  const patch = row && rpcLaunchSeed(row, agentKind.value, currentAgent.value?.kind === "codex", props.defaultModel);
+  if (patch) await persistLaunch(patch);
 }
 
 // Profile switcher — the Claude provider instances (each one is a config dir).
@@ -1617,6 +1851,14 @@ async function openSideChat() {
     S.notice(`Could not start a side chat: ${e}`);
   }
 }
+async function explainSelection(quote: string) {
+  try {
+    await explainInSideChat(props.chatId, quote);
+    openRightPanelSurface("side-chat", props.workspaceId);
+  } catch (e) {
+    S.notice(`Could not start a side chat: ${e}`);
+  }
+}
 function surfaceIcon(surface: string) {
   return surface === "background" ? PhTerminalWindow : surface === "progress" ? PhListChecks : surface === "outputs" ? PhFileCode : PhArrowSquareOut;
 }
@@ -1753,19 +1995,8 @@ interface ToolGroupHeader {
 }
 const toolGroupExpanded = reactive<Record<string, boolean>>({});
 const thinkingExpanded = reactive<Record<number, boolean>>({});
-function isBashTool(msg: ChatMessage): boolean {
-  return toolIconFor(msg) === PhTerminalWindow;
-}
-function groupLabel(items: ChatMessage[]): string {
-  const n = items.length;
-  const bash = items.filter(isBashTool).length;
-  const s = (c: number) => (c === 1 ? "" : "s");
-  if (bash === n) return `Ran ${n} command${s(n)}`;
-  if (bash === 0) return `Used ${n} tool${s(n)}`;
-  return `Used ${n} tools and ran ${bash} command${s(bash)}`;
-}
 function groupIcon(items: ChatMessage[]): unknown {
-  return items.every(isBashTool) ? PhTerminalWindow : PhWrench;
+  return items.every(isCommandTool) ? PhTerminalWindow : PhWrench;
 }
 function groupHasFailure(items: ChatMessage[]): boolean {
   return items.some((m) => m.toolFailed);
@@ -1773,29 +2004,18 @@ function groupHasFailure(items: ChatMessage[]): boolean {
 function groupIsRunning(items: ChatMessage[]): boolean {
   return items.some((m) => toolStatus(m) === "running");
 }
+// The grouping + turn fold rule lives in src/lib/transcriptRows.ts (shared
+// fixtures with iOS). Queued, plumbing and empty-thinking rows are hidden there.
+const transcript = computed(() => transcriptRows(messages.value, { settledLast: !busy.value, foldOverride: foldedTurns }));
 const grouping = computed(() => {
-  const display: (ChatMessage | ToolGroupHeader)[] = [];
   const groupIdByMsgId = new Map<number, string>();
   const groupsById = new Map<string, ToolGroupHeader>();
-  // Queued follow-ups render pinned below the live turn (like Claude desktop),
-  // not at their array position — streamed output lands after them.
-  const msgs = messages.value.filter((m) => m.role !== "queued");
-  let i = 0;
-  while (i < msgs.length) {
-    const m = msgs[i];
-    if (m.role !== "tool") { display.push(m); i++; continue; }
-    const start = i;
-    while (i < msgs.length && msgs[i].role === "tool") i++;
-    const run = msgs.slice(start, i);
-    const trailingLive = i === msgs.length && toolStatus(run[run.length - 1]) === "running";
-    if (run.length < 2 || trailingLive) { display.push(...run); continue; }
-    const groupId = String(run[0].toolUseId ?? run[0].id);
-    const header: ToolGroupHeader = { role: "tool-group-header", id: `hdr-${groupId}`, groupId, items: run };
-    display.push(header);
-    groupsById.set(groupId, header);
-    for (const item of run) { display.push(item); groupIdByMsgId.set(item.id, groupId); }
+  for (const r of transcript.value) {
+    if (r.kind !== "tools") continue;
+    groupsById.set(r.id, { role: "tool-group-header", id: `hdr-${r.id}`, groupId: r.id, items: r.items });
+    for (const item of r.items) groupIdByMsgId.set(item.id, r.id);
   }
-  return { display, groupIdByMsgId, groupsById };
+  return { groupIdByMsgId, groupsById };
 });
 // Inline diff card. The first file starts open; a click flips it.
 const diffToggles = reactive<Record<string, boolean>>({});
@@ -1831,10 +2051,11 @@ function diffBlocks(added: number, removed: number): string[] {
 // when scrolling back over a long session.
 interface TurnFoldRow { role: "turn-fold"; id: string; turnKey: number; label: string; folded: boolean; toolCount: number; fileCount: number; partial?: false }
 interface ChangedFilesRow { role: "changed-files"; id: string; files: FileEdit[]; added: number; removed: number; partial?: false }
-type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow;
+interface TurnGapRow { role: "turn-gap"; id: string; label: string; text: string; partial?: false }
+type DisplayRow = ChatMessage | ToolGroupHeader | TurnFoldRow | ChangedFilesRow | TurnGapRow;
 
-const WORK_ROLES = new Set(["thinking", "tool", "tool-group-header"]);
 const foldedTurns = reactive<Record<number, boolean>>({});
+const gapOpen = reactive<Record<string, boolean>>({});
 
 // The display row the "New" divider sits above: the first one holding a
 // message at or after the watermark. ponytail: a watermark inside a folded
@@ -1848,56 +2069,57 @@ const watermarkRowId = computed(() => {
   return row?.id ?? null;
 });
 
-const displayItems = computed<DisplayRow[]>(() => {
-  const src = grouping.value.display;
-  const out: DisplayRow[] = [];
-  let i = 0;
-  while (i < src.length) {
-    const row = src[i];
-    if (row.role !== "user") { out.push(row); i++; continue; }
-    const user = row as ChatMessage;
-    out.push(user);
-    i++;
-    const turnRows: (ChatMessage | ToolGroupHeader)[] = [];
-    while (i < src.length && src[i].role !== "user") { turnRows.push(src[i]); i++; }
-    const hasLaterTurn = i < src.length;
-    // The last turn is settled only once the chat is idle; earlier ones always are.
-    const settled = hasLaterTurn || !busy.value;
-    const folded = settled && (foldedTurns[user.id] ?? hasLaterTurn);
-    const label = user.turnMs ? `Worked ${fmtDuration(user.turnMs)}` : "Worked";
-    const toolCount = turnRows.filter((r) => r.role === "tool").length;
-    const projectEdit = (r: ChatMessage | ToolGroupHeader) => {
-      if (r.role !== "tool") return null;
-      const e = editOf((r as ChatMessage).toolInput);
-      return e && isProjectPath(e.path, props.cwd) ? e : null;
-    };
-    const fileCount = new Set(turnRows.map((r) => projectEdit(r)?.path).filter(Boolean)).size;
-
-    const edits: FileEdit[] = [];
-    let foldEmitted = false;
-    for (const r of turnRows) {
-      const e = projectEdit(r);
-      if (e) edits.push(e);
-      if (settled && WORK_ROLES.has(r.role)) {
-        if (!foldEmitted) {
-          out.push({ role: "turn-fold", id: `fold-${user.id}`, turnKey: user.id, label, folded, toolCount, fileCount });
-          foldEmitted = true;
-        }
-        if (folded) continue;
-      }
-      out.push(r);
+// Per turn (its user row id): the project files its tool calls edited, and
+// whether it is settled — for the fold row's count and the changed-files card.
+const turnEdits = computed(() => {
+  const out = new Map<number, { edits: FileEdit[]; settled: boolean; ms: number }>();
+  const msgs = messages.value.filter(isVisibleRow);
+  let cur: { edits: FileEdit[]; settled: boolean; ms: number } | null = null;
+  for (const m of msgs) {
+    if (m.role === "user" && m.auto && cur) { cur.ms += m.turnMs ?? 0; continue; } // one turn with Go's follow-ups
+    if (m.role === "user") {
+      if (cur) cur.settled = true; // a later turn exists
+      cur = { edits: [], settled: !busy.value, ms: m.turnMs ?? 0 };
+      out.set(m.id, cur);
+      continue;
     }
-    if (settled && edits.length > 0) {
-      const files = mergeEdits(edits);
-      out.push({
-        role: "changed-files",
-        id: `cf-${user.id}`,
-        files,
-        added: files.reduce((n, f) => n + f.added, 0),
-        removed: files.reduce((n, f) => n + f.removed, 0),
-      });
+    if (!cur || m.role !== "tool") continue;
+    const e = editOf(m.toolInput);
+    if (e && isProjectPath(e.path, props.cwd)) cur.edits.push(e);
+  }
+  return out;
+});
+
+const displayItems = computed<DisplayRow[]>(() => {
+  const out: DisplayRow[] = [];
+  let turn: number | null = null;
+  const endTurn = () => {
+    const t = turn === null ? undefined : turnEdits.value.get(turn);
+    if (!t?.settled || !t.edits.length) return;
+    const files = mergeEdits(t.edits);
+    out.push({
+      role: "changed-files",
+      id: `cf-${turn}`,
+      files,
+      added: files.reduce((n, f) => n + f.added, 0),
+      removed: files.reduce((n, f) => n + f.removed, 0),
+    });
+  };
+  for (const r of transcript.value) {
+    if (r.kind === "message") {
+      if (r.message.role === "user") { endTurn(); turn = r.message.id; }
+      out.push(r.message);
+    } else if (r.kind === "tools") {
+      out.push(grouping.value.groupsById.get(r.id)!, ...r.items);
+    } else if (r.kind === "gap") {
+      out.push({ role: "turn-gap", id: `gap-${r.message.id}`, label: r.label, text: r.message.text });
+    } else {
+      const turnMs = turnEdits.value.get(r.turn)?.ms;
+      const fileCount = new Set(turnEdits.value.get(r.turn)?.edits.map((e) => e.path)).size;
+      out.push({ role: "turn-fold", id: `fold-${r.turn}`, turnKey: r.turn, label: turnMs ? `Worked ${fmtDuration(turnMs)}` : "Worked", folded: r.folded, toolCount: r.tools, fileCount });
     }
   }
+  endTurn();
   return out;
 });
 // Consecutive same-role bubbles (user asking two things in a row, or an
@@ -1928,7 +2150,7 @@ function revealForFind(id: number) {
   const msg = messages.value[i];
   if (msg?.role !== "tool" && msg?.role !== "thinking") return;
   for (let u = i - 1; u >= 0; u--) {
-    if (messages.value[u].role === "user") { foldedTurns[messages.value[u].id] = false; break; }
+    if (messages.value[u].role === "user" && !messages.value[u].auto) { foldedTurns[messages.value[u].id] = false; break; }
   }
   const group = groupIdOf(id);
   if (group) toolGroupExpanded[group] = true;
@@ -1959,31 +2181,6 @@ interface AccountInfo {
   rate_limit_tier: string;    // "default_claude_max_5x" | ...
   status_text: string;        // raw `claude status` stdout
 }
-
-// Legacy per-chat localStorage key prefix (kept only for the one-time migration below).
-
-// Transcripts live in SQLite (chat_messages), not config.json: one row per
-// message means saving a turn writes that turn, where the old config-backed
-// version re-serialised every chat's history — 5.6 MB per saved message once a
-// few dozen chats had accumulated. Migration of existing histories happens once
-// in Go at startup.
-async function loadMessages(chatId: number): Promise<{ messages: ChatMessage[]; hiddenBefore: number }> {
-  // The newest window only — the rest is one "Load earlier" away. An older
-  // backend without the paged call falls back to reading everything.
-  try {
-    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE });
-    if (Array.isArray(page?.messages)) return { messages: page.messages, hiddenBefore: page.start };
-  } catch { /* fall through */ }
-  try {
-    const raw = await invoke<string>("load_chat_messages", { chatId });
-    const parsed = JSON.parse(raw);
-    return { messages: Array.isArray(parsed) ? (parsed as ChatMessage[]) : [], hiddenBefore: 0 };
-  } catch {
-    return { messages: [], hiddenBefore: 0 };
-  }
-}
-
-
 
 const DRAFT_KEY = computed(() => `burrow.draft.chat.${props.chatId}`);
 const inputText = ref(localStorage.getItem(DRAFT_KEY.value) ?? "");
@@ -2461,7 +2658,7 @@ const CATCH_UP_MESSAGES = 30;
 const CATCH_UP_LABELS: Record<string, string> = {
   needs_you: "Needs you", blocked: "Blocked", in_progress: "In progress", done: "Done", untested: "Untested",
 };
-const showCatchUpBtn = computed(() => !inputText.value.trim() && messages.value.length > 2 && !catchUp.open);
+const showCatchUpBtn = computed(() => !phone.value && !inputText.value.trim() && messages.value.length > 2 && !catchUp.open);
 const catchUp = reactive({
   open: false, loading: false, error: "", copied: false, summary: "",
   items: [] as { tag: string; text: string }[],
@@ -2494,28 +2691,6 @@ async function copyCatchUp() {
 }
 watch(() => props.chatId, () => Object.assign(catchUp, { open: false, summary: "", items: [], error: "" }));
 
-// Upgrade the heuristic title with a model-written one (headless `claude -p`,
-// same cheap model as the commit-message button). Fire-and-forget: the
-// heuristic title is already on screen, so a failure or a slow answer costs
-// nothing. Bails if anything better claimed the title meanwhile.
-async function refineTitle(text: string) {
-  const heuristic = smartTitle(text);
-  let title = "";
-  try {
-    title = await invoke<string>("generate_chat_title", {
-      cwd: props.cwd,
-      model: uiStore.textGenerationModel,
-      policy: uiStore.textGenerationPolicy,
-      text,
-    });
-  } catch {
-    return;
-  }
-  if (!title || claudeGeneratedTitle.value) return;
-  const session = chats.sessions.find((s) => s.id === props.chatId);
-  if (!session || session.pinnedTitle || session.title !== heuristic) return;
-  chats.sync(props.chatId, { title });
-}
 
 
 
@@ -2640,7 +2815,6 @@ async function copyMessage(msg: ChatMessage) {
     }, 1_200);
   } catch (e) {
     S.notice(`Could not copy message: ${e}`);
-    S.save();
   }
 }
 
@@ -2651,7 +2825,29 @@ async function sendInitialPrompt(prompt: string, images?: string[]) {
   await sendMessage(prompt, images);
 }
 
-async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string } | null> {
+// The Done card's Archive. A chat that is an open tab is archived by closing
+// the tab (Terminal's stopChatSession), like the Sidebar's ×; archiving only
+// the row left the tab — and the card — on screen. Elsewhere (tray panel, a
+// popped-out window, a sub-agent in the RP) there is no tab to close.
+function archiveFromCard() {
+  const wsId = props.workspaceId;
+  const tab = wsId != null ? termTabs.tabsByWs[wsId]?.find((t) => t.chatId === props.chatId) : undefined;
+  const title = activeSession.value?.title ?? "chat";
+  if (!tab || wsId == null) {
+    void chats.archive(props.chatId);
+    return;
+  }
+  const chatId = props.chatId;
+  termTabs.close(wsId, tab.id);
+  useNotificationsStore().push({
+    type: "info",
+    title: `Archived “${title}”`,
+    duration: 8000,
+    action: { label: "Undo", run: () => termTabs.openChat(wsId, chatId) },
+  });
+}
+
+async function sendMessage(forcedText?: string, extraImages?: string[]): Promise<{ id: number; text: string; queued: boolean } | null> {
   const feedbackBatch = forcedText === undefined && !busy.value ? [...transcriptFeedback.pending.value] : [];
   const sendingChatId = props.chatId;
   const raw = forcedText ?? inputText.value;
@@ -2681,18 +2877,30 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
     feedbackSendError.value = "";
   };
   const images = [...pendingImages.value, ...(extraImages ?? [])];
-  // A follow-up is always a separate turn.  In particular, do not rely on an
-  // ACP adapter's prompt queueing: Codex can reinterpret a second turn/start
-  // as steering, and generic adapters have no negotiated queue capability.
+  // A paired device with its socket down: keep the message on this device and
+  // let the reconnect hand it to Go's queue, rather than a send that would sit
+  // in the transport for ~15 s and then fail.
+  if (linkDown()) {
+    if (!S.hold(text, images)) {
+      S.notice("Offline, and the message could not be saved on this device.");
+      return null;
+    }
+    acceptFeedback();
+    pendingImages.value = [];
+    inputText.value = "";
+    return null;
+  }
+  // A follow-up is always a separate turn, queued in Go behind the running one
+  // (chat_submit decides). `busy` here only skips the new-turn bookkeeping.
   if (busy.value) {
-    const queued = await enqueueMessage(text, images);
-    if (!queued) return null;
+    const res = await S.submit({ text, images: images.length ? images : undefined });
+    if (!res) return null;
     acceptFeedback();
     pendingImages.value = [];
     inputText.value = "";
     await nextTick();
     scrollToBottom(true);
-    return { id: queued.id, text };
+    return { id: res.id, text, queued: res.queued };
   }
   if (!forcedText) {
     inputText.value = "";
@@ -2705,28 +2913,20 @@ async function sendMessage(forcedText?: string, extraImages?: string[]): Promise
   const displayText = text === strippedBaseline && hasPasteMarkers(raw) ? raw.trim() : undefined;
   // This is the durable start receipt. It captures the recovery checkpoint and
   // creates one audit row; provider completion freezes its final diff.
-  await invoke("start_turn_audit", {
+  // Started now, awaited inside submit after the echo is on screen.
+  const audit = invoke("start_turn_audit", {
     cwd: props.cwd,
     subjectId: `chat:${props.chatId}`,
     label: text.slice(0, 60),
-  }).catch(() => {});
-
-  // Auto-title from first user message (only if still at default and Claude hasn't set one yet)
-  if (!claudeGeneratedTitle.value) {
-    const session = chats.sessions.find((s) => s.id === props.chatId);
-    if (session && isDefaultTitle(session.title)) {
-      chats.sync(props.chatId, { title: smartTitle(text) });
-      void refineTitle(text);
-    }
-  }
+  });
 
   pendingImages.value = [];
   syncStore();
-  const sentId = await S.send({ text, images: msgImages, displayText });
-  if (sentId === null) return null;
+  const res = await S.submit({ text, images: msgImages, displayText }, audit);
+  if (res === null) return null;
   visitSeenAt.value = null;
   acceptFeedback();
-  return { id: sentId, text };
+  return { id: res.id, text, queued: res.queued };
 }
 
 
@@ -2744,6 +2944,12 @@ function toggleOption(question: string, label: string, multi: boolean) {
   } else {
     questionAnswers.value[question] = cur.includes(label) ? [] : [label];
   }
+}
+// Claude marks the suggested AskUserQuestion option with a "(Recommended)" label
+// suffix; show it as the form's badge. The answer still sends the raw label.
+function optionLabel(label: string) {
+  const text = label.replace(/\s*\(recommended\)\s*$/i, "");
+  return { text, recommended: text !== label };
 }
 function isPicked(question: string, label: string) {
   return (questionAnswers.value[question] ?? []).includes(label);
@@ -2854,12 +3060,13 @@ function onKeydown(e: KeyboardEvent) {
   // ⌘/Ctrl+Enter while busy: queue it, then steer it into the running turn.
   if (e.key === "Enter" && !e.shiftKey && (e.metaKey || e.ctrlKey) && steerable.value) {
     e.preventDefault();
-    void sendMessage().then((queued) => { if (queued) void S.steer(queued.id); });
+    steerNow();
     return;
   }
   // On a phone the soft keyboard has no Shift+Enter, so Enter is a newline
-  // (ComposerTextInput inserts it) and the send button sends.
-  if (e.key === "Enter" && !e.shiftKey && !phone.value) { e.preventDefault(); sendMessage(); }
+  // (ComposerTextInput inserts it) and the send button sends. Only a browser:
+  // a narrow desktop window (mini chat, tray panel) still has a keyboard.
+  if (e.key === "Enter" && !e.shiftKey && !(phone.value && isWeb)) { e.preventDefault(); sendMessage(); }
 }
 
 // ArrowUp at the start of the box (or in an empty one) recalls what the user
@@ -2888,12 +3095,30 @@ function onInput() {
   void completion.update();
 }
 
-function addImageFile(file: File) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+// Downscaled to 1568 px (Claude's own resize threshold) and JPEG'd like the iOS
+// composer: a phone photo is otherwise MBs on the socket, and HEIC isn't accepted.
+// Falls back to the raw file if the browser can't decode it.
+async function addImageFile(file: File) {
+  const raw = () => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") pendingImages.value.push(reader.result);
+    };
+    reader.readAsDataURL(file);
   };
-  reader.readAsDataURL(file);
+  if (file.type === "image/gif" || file.type === "image/svg+xml") return raw();
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale);
+    c.height = Math.round(bmp.height * scale);
+    c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    pendingImages.value.push(c.toDataURL("image/jpeg", 0.85));
+  } catch {
+    raw();
+  }
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -2931,27 +3156,6 @@ function onWindowKeydown(e: KeyboardEvent) {
 // once app-wide (subsequent calls see the config key already populated and no-op).
 function migrateLegacyChatConfig() {
   const MISSING = Symbol("missing");
-
-  // Legacy per-chat transcripts: burrow.claude.msgs.<id>. These now go straight
-  // to SQLite — routing them through config.json's chatMessageHistory would drop
-  // them silently, since Go's config→SQLite migration has already run by the
-  // time this executes and nothing reads that key any more.
-  {
-    const re = /^burrow\.claude\.msgs\.(\d+)$/;
-    const keys = Object.keys(localStorage).filter((k) => re.test(k));
-    for (const k of keys) {
-      const id = Number(k.match(re)![1]);
-      const raw = localStorage.getItem(k);
-      if (raw === null) continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) continue;
-        void invoke("save_chat_messages", { chatId: id, messages: JSON.stringify(parsed) })
-          .then(() => localStorage.removeItem(k))
-          .catch(() => { /* keep the key so the next launch retries */ });
-      } catch { /* skip malformed entry */ }
-    }
-  }
 
   // chatAcpSettings: burrow.acpMode.<id> / burrow.acpModel.<id> / burrow.acpEffort.<id>
   if (getConfig<unknown>("chatAcpSettings", MISSING) === MISSING) {
@@ -3079,24 +3283,15 @@ onMounted(async () => {
     const cached = getAcpCapabilities(props.chatId, agentKind.value);
     if (cached) S.seedAcpCapabilities(cached.modes, cached.configOptions);
   }
-  // Only read the transcript back from SQLite when the session has none. A
-  // non-empty session is the LIVE copy — it kept receiving while this view was
-  // unmounted, so it is ahead of the DB, and assigning over it would throw the
-  // newer part away (exactly the hole this plan is about).
-  if (messages.value.length === 0) {
-    try {
-      const loaded = await loadMessages(props.chatId);
-      if (unmounted) return;
-      S.hydrate({ messages: loaded.messages, hiddenBefore: loaded.hiddenBefore });
-    } finally {
-      transcriptLoading.value = false;
-    }
-    // Catch up on anything the agent said after that transcript was written —
-    // i.e. a turn that was in flight when the app was last closed or crashed.
-    await replayChatStream(props.chatId);
-    if (unmounted) return;
+  // Go's transcript: the newest page the first time, then chat_subscribe from
+  // its rev (a session that kept its window behind an unmounted view only
+  // catches up). Splices keep it current from here on.
+  try {
+    await S.loadTranscript();
+  } finally {
+    transcriptLoading.value = false;
   }
-  transcriptLoading.value = false;
+  if (unmounted) return;
   // A remount is how you come back to a chat now (fáze 3 unmounts hidden chat
   // leaves), so land on the newest message. The activeByWs watcher below cannot
   // do it: the active id is already this chat before the fresh instance mounts,
@@ -3109,7 +3304,13 @@ onMounted(async () => {
   // Pin what this device resolved (its "last used" defaults) onto the row on
   // first mount: the row is what Go starts the process with, and it must not
   // start a different model than the picker shows.
-  if (!usesRpcRuntime.value) seedLaunchRow();
+  if (!usesRpcRuntime.value) await seedLaunchRow();
+  else await seedRpcLaunchRow();
+  // A fresh thread: start its process now (after the row holds the launch
+  // settings), so the CLI's own startup overlaps the typing / the checkpoint
+  // instead of following the first prompt.
+  const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
+  if (!stored && S.messages.value.length === 0) void invoke("chat_warm", { chatId: props.chatId }).catch(() => {});
 
   // Mounted normally means visible (Terminal.isChatVisible), but a chat spawned
   // with a prompt can mount unwatched — marking that one seen would clear a dot
@@ -3121,7 +3322,6 @@ onMounted(async () => {
   // control calls (focus/list/new-tab/spawn) don't prompt every time. User can
   // still tighten via the perm-mode switch / Deny.
   if (props.compact) chats.addPermissionRule("Bash:burrow");
-  const stored = chats.sessions.find((s) => s.id === props.chatId)?.claudeSessionId ?? "";
   if (stored) S.hydrate({ sessionId: stored });
   S.sync();
   // The raw listeners are JS-only and free — attach both, so a cold chat
@@ -3129,12 +3329,11 @@ onMounted(async () => {
   // immediately.
   await S.listenClaude();
   await S.listenAcp();
+  // As soon as the raw listeners exist — a fresh chat has no pending request to recover.
+  if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
   // A request that arrived before these listeners existed (a view mounted late —
   // slow link, chat started elsewhere) is not replayed by the stream; ask for it.
   await S.recoverPendingRequests();
-  // No drain here: it already ran above, unconditionally. Two drains in one
-  // mount each take their own message and send both turns at once.
-  if (props.initialPrompt) sendInitialPrompt(props.initialPrompt, props.initialImages);
 
   // Load account info (plan, 5h window) — non-blocking.
   invoke<AccountInfo>("claude_get_account", { cwd: props.cwd })
@@ -3348,6 +3547,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 }
 :deep(.mention-pill) {
   --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>');
+}
+:deep(.thread-chip) {
+  cursor: pointer;
+  --mention-pill-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></svg>');
 }
 
 /* The user bubble is a quiet neutral surface (--bg-selected), so fences and
@@ -3577,9 +3780,10 @@ defineExpose({ sendMessage, focusInput, selectModel, selectedModel, getPermMode,
 .worked-bar { display: flex; width: 100%; align-items: center; gap: 9px; padding: 9px 14px; border: none; border-radius: 12px; font-size: 13.5px; text-align: left; cursor: pointer; background: color-mix(in srgb, var(--chat-text) 4%, var(--chat-bg)); }
 .worked-bar:hover { background: color-mix(in srgb, var(--chat-text) 7%, var(--chat-bg)); }
 .worked-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--chat-border); font-size: 11.5px; color: var(--chat-text-secondary); }
-.working-spark { color: #E0876A; animation: working-spin 9s linear infinite, working-pulse 1.6s ease-in-out infinite; }
-@keyframes working-spin { to { transform: rotate(360deg); } }
-@keyframes working-pulse { 50% { opacity: .55; } }
+/* 8 frames of 40x20 in one strip (assets/dachshund-run.png). */
+.working-dog { width: 40px; height: 20px; flex-shrink: 0; background: url("../assets/dachshund-run.png") 0 0 / 320px 20px no-repeat; image-rendering: pixelated; animation: working-dog-run .8s steps(8) infinite reverse; /* the strip's leg cycle runs backwards */ }
+@keyframes working-dog-run { to { background-position: -320px 0; } }
+@media (prefers-reduced-motion: reduce) { .working-dog { animation: none; } }
 
 /* Inline diff card (changed-files row). */
 .diff-card { border: 1px solid var(--chat-border); border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--chat-text) 2%, var(--chat-bg)); }

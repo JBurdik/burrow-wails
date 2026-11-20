@@ -65,6 +65,10 @@ func (s *Server) OnExit(id string) {
 	s.broadcast(daemonproto.Envelope{Type: "frame", Frame: &daemonproto.Frame{Event: "pty-exit", ID: id}})
 }
 
+func (s *Server) OnAltExit(id string) {
+	s.broadcast(daemonproto.Envelope{Type: "frame", Frame: &daemonproto.Frame{Event: "pty-resync", ID: id}})
+}
+
 func (s *Server) broadcast(env daemonproto.Envelope) {
 	// Snapshot under the lock, send outside it. Holding s.mu across the writes
 	// meant one slow client stalled every other client AND every brand-new
@@ -140,11 +144,20 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 		resp.IDs = s.mgr.List()
 	case "foreground":
 		resp.Name, resp.Pid, err = s.mgr.ForegroundInfo(req.ID)
+		resp.Alt, resp.AtPrompt = s.mgr.ScreenFlags(req.ID)
 	case "since":
 		var data []byte
 		resp.Off, data, err = s.mgr.Since(req.ID, req.Since)
 		resp.Data = daemonproto.BytesToInts(data)
+	case "screen_text":
+		resp.Text, err = s.mgr.ScreenText(req.ID, req.Lines)
+	case "attach":
+		var snap ptycore.Snapshot
+		if snap, err = s.mgr.Attach(req.ID); err == nil {
+			resp.Off, resp.VT, resp.Cols, resp.Rows, resp.Alt = snap.Off, snap.VT, snap.Cols, snap.Rows, snap.Alt
+		}
 	case "version":
+		resp.Emulator = ptycore.Emulator()
 		resp.ExePath, _ = os.Executable()
 		resp.Pid = os.Getpid()
 	case "privacy":

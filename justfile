@@ -53,6 +53,10 @@ where:
 
 # ── dev ───────────────────────────────────────────────────────────────────────
 
+# Native SwiftUI iOS app (ios/): development-signed IPA, served by the core at https://<mac>.ts.net/ios
+ios-native:
+    ios/release.sh
+
 # Native dev window (hot-reload)
 dev:
     cd src-wails && BURROW_DATA_SUFFIX="${BURROW_DATA_SUFFIX:-dev}" wails3 task dev
@@ -62,6 +66,27 @@ dev:
 # `claude mcp add --transport http burrow-app http://127.0.0.1:9099/mcp`
 dev-mcp:
     WAILS_MCP=1 just dev
+
+# Build the pinned libghostty-vt static lib for burrow-daemon's `vt` tag
+# (docs/plans/010-server-side-vt.md) into src-wails/third_party/ (gitignored).
+# Needs zig 0.17+ (ZIG=/path/to/zig to override) and cmake. Once per bump.
+libghostty:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    zig="${ZIG:-zig}"
+    "$zig" version | grep -qE '^0\.(1[7-9]|[2-9][0-9])' || { echo "need zig >= 0.17 (got $("$zig" version)); set ZIG=" >&2; exit 1; }
+    src="${XDG_CACHE_HOME:-$HOME/.cache}/burrow-vt/go-libghostty"
+    [ -d "$src" ] || git clone -q https://tangled.org/mitchellh.com/go-libghostty "$src"
+    # Pin = the go.mod pseudo-version's commit; bump both together.
+    git -C "$src" fetch -q origin && git -C "$src" checkout -q df1957cbff56
+    PATH="$(dirname "$(command -v "$zig")"):$PATH" cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
+    PATH="$(dirname "$(command -v "$zig")"):$PATH" cmake --build "$src/build"
+    out="$PWD/src-wails/third_party/libghostty-vt/aarch64-macos"
+    rm -rf "$out" && mkdir -p "$out"
+    cp -R "$src/build/_deps/ghostty-src/zig-out/"{include,lib,share} "$out/"
+    rm -f "$out"/lib/*.dylib
+    sed -i '' "s|^prefix=.*|prefix=$out|" "$out"/share/pkgconfig/*.pc
+    echo "libghostty-vt → $out"
 
 # Frontend only, in the browser (no Wails backend)
 web:
@@ -78,6 +103,17 @@ check:
     pnpm vue-tsc --noEmit
     pnpm test
     cd src-wails && go vet ./... && go build ./... && go test ./...
+
+# Probe a running core's chat wire: subscribe, send one probe message to chat
+# ID, print splice / tail / rev timings. `just probe-chat 42 --suffix dev`.
+[positional-arguments]
+probe-chat *ARGS:
+    node scripts/probe-chat.mjs "$@"
+
+# End-to-end smoke of the phone's remote path over loopback: pair → ticket →
+# /v2/ws → calls → events + resume → revoke.
+smoke-remote:
+    cd src-wails && go test -race -count=1 -run '^TestRemoteSmoke$' .
 
 # ── beta (local-only, never signed/notarized/released) ─────────────────────────
 
@@ -103,7 +139,7 @@ build-beta:
     ID="{{beta_sign_id}}"
     if [ -n "$ID" ]; then
       # Inner binaries first, then the bundle (it seals the Info.plist edits above).
-      for bin in burrow-daemon burrow-mcp Burrow; do
+      for bin in burrow-daemon burrow-mcp burrow-fm Burrow; do
         codesign --force --sign "$ID" "build/bin/Burrow Beta.app/Contents/MacOS/$bin"
       done
       codesign --force --sign "$ID" "build/bin/Burrow Beta.app"
@@ -116,6 +152,15 @@ build-beta:
 
 # Build + install the beta locally on this Mac (personal signature, not released).
 beta: build-beta
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stop the running beta (UI, then core) before swapping the bundle: a core
+    # that sees its binary change restarts itself while the new UI starts its
+    # own, and the two race over the tray panel. Same as tray → Quit.
+    osascript -e 'quit app id "com.agenticide.wails.beta"' 2>/dev/null || true
+    core="Burrow Beta.app/Contents/MacOS/Burrow --core"
+    pkill -TERM -f "$core" || true
+    for _ in $(seq 50); do pgrep -f "$core" >/dev/null || break; sleep 0.2; done
     rm -rf "/Applications/Burrow Beta.app"
     cp -R "src-wails/build/bin/Burrow Beta.app" /Applications/
     open "/Applications/Burrow Beta.app"
@@ -156,7 +201,7 @@ sign:
     set -euo pipefail
     ID="{{sign_id}}"
     ENT="src-wails/build/darwin/entitlements.plist"
-    for bin in burrow-daemon burrow-mcp Burrow; do
+    for bin in burrow-daemon burrow-mcp burrow-fm Burrow; do
       codesign --force --timestamp --options runtime --entitlements "$ENT" \
                --sign "$ID" "{{app}}/Contents/MacOS/$bin"
     done
@@ -173,7 +218,7 @@ sign:
 assert-signed:
     #!/usr/bin/env bash
     set -euo pipefail
-    for bin in Burrow burrow-daemon burrow-mcp; do
+    for bin in Burrow burrow-daemon burrow-mcp burrow-fm; do
       out="$(codesign -dv "{{app}}/Contents/MacOS/$bin" 2>&1)"
       grep -q "TeamIdentifier={{APPLE_TEAM_ID}}" <<<"$out" \
         || { echo "❌ $bin is not signed by team {{APPLE_TEAM_ID}} (is 'wails3 dev' running and overwriting build/bin?) — run 'just sign'"; exit 1; }
@@ -334,7 +379,7 @@ verify:
     hr "signature + hardened runtime"
     codesign -dvvv "{{app}}" 2>&1 | grep -E "Authority=|TeamIdentifier=|flags=|Runtime Version" | head
     hr "nested binaries"
-    for b in Burrow burrow-daemon burrow-mcp; do
+    for b in Burrow burrow-daemon burrow-mcp burrow-fm; do
       printf '%-14s ' "$b"; codesign --verify --strict "{{app}}/Contents/MacOS/$b" && echo ok
     done
     hr "Gatekeeper — app (exec)"

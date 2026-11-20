@@ -116,7 +116,7 @@ func TestChatRewindTruncatesAndResumesForked(t *testing.T) {
 	}
 	drainChatStream(t, a, "1")
 	events := chatEvents(t, "1")
-	_ = a.ChatSend(c.ID, "hi", nil)
+	_ = a.ChatSend(c.ID, "hi", nil, "")
 
 	if err := a.ChatRewind(c.ID, 3, "b"); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestChatRewindTruncatesAndResumesForked(t *testing.T) {
 		t.Fatalf("want a trailing session.reset, got %+v", got)
 	}
 
-	_ = a.ChatSend(c.ID, "b2", nil)
+	_ = a.ChatSend(c.ID, "b2", nil, "")
 	args := fake.lastStart().args
 	i := slices.Index(args, "--resume")
 	if i < 0 || args[i+1] != "sess-1" || !slices.Contains(args, "--fork-session") ||
@@ -175,7 +175,7 @@ func TestChatRewindToFirstPromptStartsFresh(t *testing.T) {
 	if row, _ := a.chatByID(c.ID); row.ClaudeSessionID != "" {
 		t.Fatalf("session kept: %+v", row)
 	}
-	_ = a.ChatSend(c.ID, "a2", nil)
+	_ = a.ChatSend(c.ID, "a2", nil, "")
 	if slices.Contains(fake.lastStart().args, "--resume") {
 		t.Fatalf("fresh start resumed: %v", fake.lastStart().args)
 	}
@@ -207,7 +207,7 @@ func TestChatForkCopiesUpToTheCutAndLeavesParent(t *testing.T) {
 		t.Fatalf("parent got a resume point: %q", at)
 	}
 
-	_ = a.ChatSend(child.ID, "next", nil)
+	_ = a.ChatSend(child.ID, "next", nil, "")
 	args := fake.lastStart().args
 	if args[slices.Index(args, "--resume")+1] != "sess-1" || args[slices.Index(args, "--resume-session-at")+1] != "u1" ||
 		!slices.Contains(args, "--fork-session") {

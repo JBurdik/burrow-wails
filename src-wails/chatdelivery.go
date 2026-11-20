@@ -20,12 +20,14 @@ type deliverySource int
 const (
 	deliverNotice      deliverySource = iota // a sub-agent finished / blocked: the thread acts on it first
 	deliverLimitResume                       // "Continue where you left off." after a usage limit (chatlimit.go)
+	deliverNetResume                         // continue after a network drop / a restart cut a turn (chatnetresume.go)
 	deliverQueue                             // the user's queued follow-ups, head first
 	deliverSchedule                          // scheduled prompts / wake-ups, by due time
 )
 
-// chatSender is ChatSend's shape; production wires chatSendSettled.
-type chatSender func(chatID int64, text string, images []string) error
+// chatSender is ChatSend's shape; production wires chatSendSettled. auto
+// marks a send Go made on its own (nil = the user's words, e.g. their queue).
+type chatSender func(chatID int64, text string, images []string, clientID string, auto *autoSend) error
 
 type pendingDelivery struct {
 	ChatID    int64
@@ -75,6 +77,7 @@ func (a *App) deliverPending(now time.Time, send chatSender) {
 	var items []pendingDelivery
 	items = append(items, a.noticeDeliveries(now, send, nil)...)
 	items = append(items, a.limitResumeDeliveries(now, send, nil)...)
+	items = append(items, a.netResumeDeliveries(now, send, nil)...)
 	items = append(items, a.queueDeliveries(send, nil)...)
 	items = append(items, a.scheduleDeliveries(now, send, nil)...)
 	// A chat still on a usage limit gets nothing: each send would fail on it.
@@ -88,7 +91,7 @@ var errChatBusy = errors.New("chat has a turn in flight")
 // chatSendSettled is ChatSend that re-checks "settled" under the chat lock: a
 // user's own ChatSend may be mid-start (phase still idle while the process
 // spawns), and a delivery racing it must not become a steer.
-func (a *App) chatSendSettled(chatID int64, text string, images []string) error {
+func (a *App) chatSendSettled(chatID int64, text string, images []string, clientID string, auto *autoSend) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
@@ -98,7 +101,11 @@ func (a *App) chatSendSettled(chatID int64, text string, images []string) error 
 	if !a.chatSettled(id) {
 		return errChatBusy
 	}
-	return a.chatSendLocked(c, id, text, images)
+	if auto != nil {
+		a.chatRT.auto.Store(id, auto)
+		defer a.chatRT.auto.Delete(id)
+	}
+	return a.chatSendLocked(c, id, text, images, clientID)
 }
 
 // kickChatDelivery runs a pass shortly after a turn settles (or an item is

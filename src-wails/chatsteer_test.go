@@ -43,14 +43,14 @@ func TestChatSteerClaudeWritesIntoRunningTurn(t *testing.T) {
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "claude-cli"})
 	events := chatEvents(t, "1")
 
-	if err := a.ChatSteer(c.ID, "early", nil); !errors.Is(err, errNoTurnToSteer) {
+	if err := a.ChatSteer(c.ID, "early", nil, ""); !errors.Is(err, errNoTurnToSteer) {
 		t.Fatalf("no process yet: want errNoTurnToSteer, got %v", err)
 	}
-	if err := a.ChatSend(c.ID, "go", nil); err != nil {
+	if err := a.ChatSend(c.ID, "go", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	turn := openTurnOf(a, "1")
-	if err := a.ChatSteer(c.ID, "also this", nil); err != nil {
+	if err := a.ChatSteer(c.ID, "also this", nil, ""); err != nil {
 		t.Fatalf("steer: %v", err)
 	}
 	fake.mu.Lock()
@@ -77,12 +77,12 @@ func TestChatSteerClaudeWritesIntoRunningTurn(t *testing.T) {
 
 	// Blocked on the user: refused, so the approval is not painted as running.
 	a.applyChatPhase("1", agentphase.Event{Kind: agentphase.HookPermission})
-	if err := a.ChatSteer(c.ID, "x", nil); !errors.Is(err, errNoTurnToSteer) {
+	if err := a.ChatSteer(c.ID, "x", nil, ""); !errors.Is(err, errNoTurnToSteer) {
 		t.Fatalf("waiting turn: want errNoTurnToSteer, got %v", err)
 	}
 	// Turn over: the message stays queued.
 	a.applyChatPhase("1", agentphase.Event{Kind: agentphase.HookDone})
-	if err := a.ChatSteer(c.ID, "late", nil); !errors.Is(err, errNoTurnToSteer) {
+	if err := a.ChatSteer(c.ID, "late", nil, ""); !errors.Is(err, errNoTurnToSteer) {
 		t.Fatalf("ended turn: want errNoTurnToSteer, got %v", err)
 	}
 	if got := userDeltas(events()); len(got) != 2 {
@@ -121,7 +121,7 @@ func TestChatSteerCodexSendsTurnSteer(t *testing.T) {
 	})
 	a.applyChatPhase("1", agentphase.Event{Kind: agentphase.HookRunning})
 
-	if err := a.ChatSteer(c.ID, "focus on tests", []string{"data:image/png;base64,AA=="}); err != nil {
+	if err := a.ChatSteer(c.ID, "focus on tests", []string{"data:image/png;base64,AA=="}, ""); err != nil {
 		t.Fatalf("steer: %v", err)
 	}
 	mu.Lock()
@@ -147,14 +147,14 @@ func TestChatSteerCodexSendsTurnSteer(t *testing.T) {
 	sess.mu.Lock()
 	sess.turnID = "turn-0"
 	sess.mu.Unlock()
-	if err := a.ChatSteer(c.ID, "stale", nil); err == nil || !strings.Contains(err.Error(), "mismatch") {
+	if err := a.ChatSteer(c.ID, "stale", nil, ""); err == nil || !strings.Contains(err.Error(), "mismatch") {
 		t.Fatalf("want Codex's refusal, got %v", err)
 	}
 	// No addressable turn yet.
 	sess.mu.Lock()
 	sess.turnID = ""
 	sess.mu.Unlock()
-	if err := a.ChatSteer(c.ID, "x", nil); !errors.Is(err, errNoTurnToSteer) {
+	if err := a.ChatSteer(c.ID, "x", nil, ""); !errors.Is(err, errNoTurnToSteer) {
 		t.Fatalf("no turn id: want errNoTurnToSteer, got %v", err)
 	}
 	if got := userDeltas(events()); len(got) != 1 {
@@ -165,7 +165,7 @@ func TestChatSteerCodexSendsTurnSteer(t *testing.T) {
 func TestChatSteerRefusesGenericACP(t *testing.T) {
 	a, _, wsID, _ := runtimeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: wsID, Transport: "acp", AgentKind: "gem"})
-	if err := a.ChatSteer(c.ID, "x", nil); err == nil || errors.Is(err, errNoTurnToSteer) {
+	if err := a.ChatSteer(c.ID, "x", nil, ""); err == nil || errors.Is(err, errNoTurnToSteer) {
 		t.Fatalf("generic ACP has no steer: got %v", err)
 	}
 }

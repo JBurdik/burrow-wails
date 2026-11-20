@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { configReady, getConfig, setConfig, onConfigChanged } from "../lib/config";
 import { KEY_COMMANDS, type KeyCommand, type KeyScope } from "../lib/keymap";
 import { matchesShortcut } from "../lib/shortcuts";
+import { noteActivity } from "../lib/activityLog";
 
 // User rebinds live in config.json under `keybindings` as a flat
 // { commandId: "⌘⇧O" } map — hand-editable, and the Settings → Keybindings UI
@@ -48,7 +49,9 @@ export const useKeybindingsStore = defineStore("keybindings", () => {
   }
 
   function matches(e: KeyboardEvent, id: string): boolean {
-    return matchesShortcut(e, shortcut(id));
+    const hit = matchesShortcut(e, shortcut(id));
+    if (hit) noteActivity({ kind: "shortcut", label: id });
+    return hit;
   }
 
   /** Commands of one scope, with their live binding — for the two key listeners. */

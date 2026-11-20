@@ -135,9 +135,11 @@ func migrate(db *sql.DB) error {
 		)`,
 	}
 	stmts = append(stmts, chatMessagesSchema()...)
+	stmts = append(stmts, chatImagesSchema()...)
 	stmts = append(stmts, chatStreamSchema()...)
 	stmts = append(stmts, remoteDevicesSchema()...)
 	stmts = append(stmts, pushSchema()...)
+	stmts = append(stmts, apnsSchema()...)
 	stmts = append(stmts, chatsSchema()...)
 	stmts = append(stmts, `CREATE TRIGGER IF NOT EXISTS openai_session_delete AFTER DELETE ON chats
         BEGIN DELETE FROM openai_sessions WHERE chat_id = CAST(old.id AS TEXT); END`)
@@ -146,6 +148,8 @@ func migrate(db *sql.DB) error {
 	stmts = append(stmts, orchSchema()...)
 	stmts = append(stmts, turnAuditSchema()...)
 	stmts = append(stmts, chatSchedulesSchema()...)
+	stmts = append(stmts, chatPinsSchema()...)
+	stmts = append(stmts, chatActionsSchema()...)
 	stmts = append(stmts, subagentNoticesSchema()...)
 	stmts = append(stmts, chatQueueSchema()...)
 	stmts = append(stmts, seenReceiptsSchema()...)
@@ -218,8 +222,13 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE chats ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE chats ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE chats ADD COLUMN pr_state TEXT NOT NULL DEFAULT ''`,
+		// end_turn's needs (chatturnneeds.go), read-only on the wire.
+		`ALTER TABLE chats ADD COLUMN turn_needs TEXT NOT NULL DEFAULT ''`,
 	}
 	alters = append(alters, chatSchedulesAlters()...)
+	alters = append(alters, chatNetResumeAlters()...)
+	// The submit door's client id rides a queued item to its user line (ADR 0001).
+	alters = append(alters, `ALTER TABLE chat_queue ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`)
 	for _, s := range alters {
 		if _, err := db.Exec(s); err != nil && !isDuplicateColumnErr(err) {
 			return fmt.Errorf("%s: %w", s, err)

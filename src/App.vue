@@ -46,10 +46,11 @@
       <div v-show="!compact && ui.sidebarVisible" class="panel-sidebar flex shrink-0"><Sidebar /></div>
       <div v-show="!compact && ui.sidebarVisible" class="resize-handle panel-resize-left" @mousedown="startResize('left', $event)" />
       <div v-show="!compact || phone === 'thread'" ref="mainEl" class="ide-main" :class="{ 'details-reserve': details?.kind === 'chat' && !details.overlay }" :style="{ '--details-inset': (detailsInset ?? 0) + 'px' }">
-        <!-- Terminals stay MOUNTED across every mode (v-show, not v-if). Unmounting
-             them on a mode switch ran XTerm.onBeforeUnmount → detach_pty + dispose;
-             returning replayed the daemon ring-buffer into a fresh fit → scrambled
-             buffer. Keeping them mounted avoids the detach/reattach entirely. -->
+        <!-- Terminals stay MOUNTED across every mode (v-show, not v-if): a fresh
+             xterm on a ring-only daemon starts blank. With an emulator daemon
+             (beta/dev, plan 010) Terminal.vue unmounts the xterms that are not on
+             screen (`shown`) and a remount rebuilds them from pty_attach. -->
+        <ArchiveUndo />
         <div v-show="ui.mode === 'terminal'" class="terminal-host">
           <WelcomeScreen ref="welcomeEl" v-show="showWelcome" @open-folder="openNewWorkspace" />
           <Terminal
@@ -58,6 +59,7 @@
             :key="w.id"
             :workspace-id="w.id"
             :cwd="w.path"
+            :shown="ui.mode === 'terminal' && !!ws.active && w.id === ws.active.id && !showWelcome"
             :ref="(el) => setTermRef(w.id, el)"
           />
         </div>
@@ -182,6 +184,8 @@ import ProjectScreen from "@/components/phone/ProjectScreen.vue";
 import MoreScreen from "@/components/phone/MoreScreen.vue";
 import { isPhoneOnlyRoute, phoneScreen, showsBottomNav } from "@/lib/phoneNav";
 import { compact, isWeb } from "@/lib/viewport";
+import { startOffline } from "@/lib/offline";
+import { appTransport } from "@/lib/wailsCompat/core";
 import AnimatedBackdrop from "@/components/AnimatedBackdrop.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import Terminal from "@/components/Terminal.vue";
@@ -198,6 +202,7 @@ import PtyPermissionToasts from "@/components/PtyPermissionToasts.vue";
 import PetOverlay from "@/components/PetOverlay.vue";
 import WorkspaceConfig from "@/components/WorkspaceConfig.vue";
 import WelcomeScreen from "@/components/WelcomeScreen.vue";
+import ArchiveUndo from "@/components/ArchiveUndo.vue";
 import ThreadDetailsCard from "@/components/ThreadDetailsCard.vue";
 import { detailsLaneInset } from "@/lib/threadDetails";
 import Onboarding from "@/components/Onboarding.vue";
@@ -222,7 +227,8 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { installControlBridge } from "@/lib/controlBridge";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { openWindow } from "@/lib/windows";
+import { canOpenWindows, openWindow } from "@/lib/windows";
+import { openMiniChat } from "@/lib/miniChat";
 import { RP_WINDOW_KEY, publishFollow, remotePanel } from "@/lib/rpWindow";
 import { installPanelTerminals } from "@/lib/rpTerminals";
 import { activeChatIdFor } from "@/stores/chatTree";
@@ -235,6 +241,9 @@ import { useDiagram } from "@/composables/useDiagram";
 import { useImageLightbox } from "@/composables/useImageLightbox";
 import { configReady, getConfig, setConfig } from "@/lib/config";
 import { useNotificationsStore } from "@/stores/notifications";
+import { retrying } from "@/lib/retrying";
+import { startActivityLog } from "@/lib/activityLog";
+import { remoteActive } from "@/lib/wailsCompat/core";
 
 let resizing: 'left' | 'right' | null = null;
 let resizeStartX = 0;
@@ -500,11 +509,15 @@ function startResize(side: 'left' | 'right', e: MouseEvent) {
   resizing = side;
   resizeStartX = e.clientX;
   resizeStartWidth = side === 'left' ? ui.sidebarWidth : ui.rightPanelWidth;
+  // An iframe under the pointer (HTML preview, Browser) swallows mousemove /
+  // mouseup, so the drag never ended and the panel kept following the mouse.
+  document.body.classList.add('panel-resizing');
   e.preventDefault();
 }
 
 function onResizeMove(e: MouseEvent) {
   if (!resizing) return;
+  if (!(e.buttons & 1)) return onResizeUp(); // the mouseup went somewhere else
   const delta = e.clientX - resizeStartX;
   if (!ui.swapPanels) {
     if (resizing === 'left') {
@@ -523,6 +536,7 @@ function onResizeMove(e: MouseEvent) {
 
 function onResizeUp() {
   resizing = null;
+  document.body.classList.remove('panel-resizing');
 }
 
 // Sync OS window title: "<tab title> — <workspace>" so macOS Mission Control /
@@ -807,8 +821,10 @@ let unlistenMenuOnboarding: UnlistenFn | null = null;
 let unlistenMenuWhatsNew: UnlistenFn | null = null;
 let unlistenMenuShortcuts: UnlistenFn | null = null;
 let unlistenMenuNavigate: UnlistenFn | null = null;
+let unlistenMenuMiniChat: UnlistenFn | null = null;
 let stopCoreLink: (() => void) | null = null;
 let unlistenControl: (() => void) | undefined;
+let unlistenResync: (() => void) | undefined;
 let unlistenWorkspacesChanged: UnlistenFn | null = null;
 let unlistenWorktreesCleaned: UnlistenFn | null = null;
 
@@ -845,8 +861,18 @@ function playStartupChime() {
   }
 }
 
+// Activity log + hang watch (src/lib/activityLog.ts): this Mac's own window only.
+let stopActivityLog: (() => void) | undefined;
+onBeforeUnmount(() => stopActivityLog?.());
 onMounted(async () => {
-  await ws.load();
+  // Paired device: connection indicator + delivery of messages held offline.
+  startOffline();
+  if (!remoteActive()) stopActivityLog = startActivityLog(router, { invoke: (c, a) => invoke(c, a), enabled: () => ui.activityLog });
+  // A paired device cold-started offline: list_workspaces fails once the
+  // transport gives up (~15 s). The rest of startup must still run; the
+  // transport's resync after it recovers (transport.ts onopen) re-reads.
+  await ws.load().catch((e) => console.warn("workspaces load failed:", e));
+  unlistenResync = appTransport().onResync(() => void retrying(() => ws.load()).catch(() => {}));
   hideSplash();
   void pendingReleaseNotes().then((n) => { whatsNew.value = n; }).catch(() => {});
   // Startup lands on the composer ("/"), never on the last session's thread —
@@ -875,6 +901,7 @@ onMounted(async () => {
   unlistenMenuShortcuts = await listen("menu-show-shortcuts", () => { cheatsheetOpen.value = true; });
   // The tray panel opened a thread/tab (desktop.go TrayOpen).
   unlistenMenuNavigate = await listen<string>("menu-navigate", (e) => { if (e.payload) void router.push(e.payload); });
+  unlistenMenuMiniChat = await listen("menu-mini-chat", () => { if (canOpenWindows()) void openMiniChat(); });
   // The same from the external core's tray (plan 009), + its quit and Dock count.
   stopCoreLink = await startCoreLink((route) => void router.push(route));
 
@@ -913,10 +940,12 @@ onBeforeUnmount(() => {
   unlistenMenuWhatsNew?.();
   unlistenMenuShortcuts?.();
   unlistenMenuNavigate?.();
+  unlistenMenuMiniChat?.();
   stopCoreLink?.();
   unlistenWorkspacesChanged?.();
   unlistenWorktreesCleaned?.();
   unlistenControl?.();
+  unlistenResync?.();
 });
 
 // One handler per rebindable app-scope command; the keybindings store owns the

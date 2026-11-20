@@ -24,6 +24,8 @@ type App struct {
 	daemon  *DaemonClient
 	phases  *PhaseStore
 	perms   *permRegistry
+	// clientIds already accepted by chat_send / chat_queue_add (chatclientid.go).
+	clientIDs clientIDs
 	secrets *secretRegistry
 	poller  *phasePoller
 	prompts *promptIndexer // nil until startup; refresh is nil-safe
@@ -227,6 +229,12 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.db = db
 	a.push = newWebPusher(filepath.Join(dataDir, "vapid.pem"))
+	if s, err := loadAPNs(dataDir, a.push.client); err != nil {
+		log.Printf("apns: off: %v", err)
+	} else {
+		a.push.apns = s
+	}
+	prunePhaseRows(db)
 	if ps, err := NewPhaseStore(db); err != nil {
 		log.Printf("phase store: %v", err)
 	} else {
@@ -255,6 +263,8 @@ func (a *App) startup(ctx context.Context) {
 	// Upgrade path: the Manager is gone, so its `control = 1` rows would
 	// otherwise come back as ordinary chats.
 	a.archiveLegacyManagerChats()
+	a.resetInterruptedRuns()
+	a.markRestartCutTurns()
 	// DeleteChat used to leave the raw stream behind; drop what it orphaned.
 	a.pruneOrphanChatStreams()
 	// Per-chat launch settings move from config.json onto the rows, once.
@@ -320,6 +330,7 @@ func (a *App) startup(ctx context.Context) {
 	if err := os.WriteFile(filepath.Join(dataDir, "hook.port"), []byte(fmt.Sprintf("%d", hookSrv.port)), 0o644); err != nil {
 		log.Printf("write hook.port: %v", err)
 	}
+	go keepHookPort(ctx, filepath.Join(dataDir, "hook.port"), hookSrv.port)
 
 	// Restore remote access if it was left on. Without this the Settings
 	// toggle silently reset to off on every launch.
@@ -332,7 +343,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if a.phases != nil {
-		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground, a.daemon.ForegroundPid)
+		a.poller = startPhasePoll(ctx, a.phases, a.ListPtySessions, a.GetPtyForeground, a.daemon.ForegroundPid, a.daemon.ForegroundScreen)
 	}
 }
 
@@ -398,6 +409,9 @@ func (a *App) CreatePty(id string, cwd string, cols, rows uint16) error {
 	if a.hookSrv != nil {
 		env = append(env, fmt.Sprintf("BURROW_HOOK_PORT=%d", a.hookSrv.port))
 	}
+	if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+		env = append(env, "BURROW_CALLER_TOKEN="+a.callerKeyEnv("pty", n))
+	}
 	// Loads the burrow mod into any Claude Code started in this tab, on top of
 	// whatever plugin dirs the user already names.
 	if a.claudeModDir != "" {
@@ -462,6 +476,21 @@ func (a *App) WritePty(id string, data []int) error {
 // fills the hole a dropped /v2/ws left (pty-data-* is not in the shell ring).
 func (a *App) PtySince(id string, since uint64) (ptyChunk, error) {
 	return a.daemon.Since(id, since)
+}
+
+// PtyEmulator: the daemon can rebuild a terminal view (pty_attach), so the UI
+// may unmount hidden terminals. Only beta/dev daemons carry it until plan 010's
+// Phase 3 ships to stable; a stable UI keeps every terminal mounted.
+func (a *App) PtyEmulator() bool {
+	return a.daemon.Emulator()
+}
+
+// PtyAttach is a snapshot of PTY `id`'s screen from the daemon's emulator — how
+// a freshly mounted view starts with the screen instead of a blank one (plan
+// 010). Errors when the daemon has none (built without `vt`): the view then
+// starts from live output, as before.
+func (a *App) PtyAttach(id string) (ptySnapshot, error) {
+	return a.daemon.Attach(id)
 }
 
 func (a *App) ResizePty(id string, cols, rows uint16) error {

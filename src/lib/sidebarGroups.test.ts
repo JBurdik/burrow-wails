@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reorderProjects } from "./projectOrder";
 import {
   buildActivityRows, groupByRepo, groupDot, rowRecedes, parseShortstat, resolveSidebarSection, splitSections, stepWorkingShelf,
-  routeRowOnly, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
+  routeRowOnly, nextAfterArchive, EMPTY_WORKING_SHELF, WORKING_EXIT_GRACE_MS, type ActivityRow, type SectionInput,
 } from "./sidebarGroups";
 import type { Workspace } from "@/stores/workspace";
 import type { TabSummary } from "@/stores/terminalTabs";
@@ -101,7 +101,11 @@ describe("groupByRepo", () => {
     ({ ws: { id: wsId, parent_id: parent }, tab: { id: tabId }, ts: 0 }) as unknown as ActivityRow;
   it("folds worktrees into their repo, keeps feed order, adds empty always-shown repos", () => {
     const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(1, null, "c"), row(2, null, "d")], [2, 9]);
-    expect(groups.map((g) => [g.repoId, g.rows.map((r) => r.tab.id)])).toEqual([[1, ["a", "c"]], [2, ["b", "d"]], [9, []]]);
+    expect(groups.map((g) => [g.repoId, g.rows.map((r) => r.tab.id)])).toEqual([[1, ["a", "c"]], [2, ["d", "b"]], [9, []]]);
+  });
+  it("puts the repo's own rows first, then each worktree's rows as one block", () => {
+    const groups = groupByRepo([row(5, 1, "a"), row(1, null, "b"), row(6, 1, "c"), row(5, 1, "d"), row(1, null, "e")]);
+    expect(groups[0].rows.map((r) => r.tab.id)).toEqual(["b", "e", "a", "d", "c"]);
   });
   it("puts pinned repos first in pin order, with a header even when empty", () => {
     const groups = groupByRepo([row(1, null, "a"), row(5, 2, "b"), row(3, null, "c")], [], [3, 7]);
@@ -235,4 +239,19 @@ describe("project order", () => {
     expect(reorderProjects([1, 2, 3], 1, 3)).toEqual([2, 1, 3]);
     expect(reorderProjects([1, 2], 1, 9)).toEqual([1, 2]); // unknown target: unchanged
   });
+});
+
+describe("nextAfterArchive", () => {
+  const needs = (r: string) => r.startsWith("!");
+  const cases: { name: string; inbox: string[]; all: string[]; current: string; want: string | null }[] = [
+    { name: "row after the current one", inbox: ["a", "b", "c"], all: ["a", "b", "c"], current: "b", want: "c" },
+    { name: "wraps to the top", inbox: ["a", "b", "c"], all: ["a", "b", "c"], current: "c", want: "a" },
+    { name: "current not in the Inbox: its first row", inbox: ["a", "b"], all: ["a", "b", "x"], current: "x", want: "a" },
+    { name: "only the current row: needs-you fallback", inbox: ["a"], all: ["a", "p", "!q"], current: "a", want: "!q" },
+    { name: "fallback never picks the current row", inbox: [], all: ["!a"], current: "!a", want: null },
+    { name: "nothing waits: inbox zero", inbox: ["a"], all: ["a", "p"], current: "a", want: null },
+  ];
+  for (const c of cases) {
+    it(c.name, () => expect(nextAfterArchive(c.inbox, c.all, c.current, needs)).toBe(c.want));
+  }
 });

@@ -61,8 +61,8 @@ type serverFrame struct {
 // ponytail: no compat/migration registry. Add per-rev shims at the first
 // breaking wire change that can't simply require a reload / restart.
 const (
-	protocolRev  = 1
-	minClientRev = 1
+	protocolRev  = 2
+	minClientRev = 2
 )
 
 func decodeClientFrame(b []byte) (clientFrame, error) {

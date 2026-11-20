@@ -8,10 +8,12 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useGitStore } from "@/stores/git";
 import { configReady, getConfig, setConfig, migrateFromLocalStorage, onConfigChanged } from "@/lib/config";
 import { listen } from "@tauri-apps/api/event";
-import { appTransport } from "@/lib/wailsCompat/core";
+import { appTransport, cachedRead } from "@/lib/wailsCompat/core";
 import { forgetChatSettings } from "@/lib/chatSettings";
 import { dropChatSession } from "@/lib/chatSession";
 import { childrenOf as childrenOfSessions, allChildrenOf as allChildrenOfSessions } from "@/stores/chatTree";
+import { parseTurnNeeds, type TurnNeeds } from "@/lib/turnNeeds";
+import { retrying } from "@/lib/retrying";
 
 export interface ClaudeSession {
   id: number;
@@ -77,31 +79,33 @@ export interface ClaudeSession {
   prNumber?: number;
   prUrl?: string;
   prState?: "open" | "draft" | "merged" | "closed";
+  // The last turn's end_turn (src-wails/chatturnneeds.go): what it needs from
+  // the user. Server-owned like collectedAt; cleared when the next turn starts.
+  turnNeeds?: TurnNeeds;
+  // A turn cut by the network or a restart, carrying on by itself once back
+  // (src-wails/chatnetresume.go). Server-owned like collectedAt.
+  netWaitAt?: number;
+  netWaitReason?: "network" | "restart";
+  // Thread attention, computed by Go (src-wails/chatattention.go) — never
+  // derived here. settledSince: unix ms from which the thread is settled
+  // (0 = not by any rule); needsYou / saidDone: the last end_turn's needs.
+  settledSince?: number;
+  needsYou?: boolean;
+  saidDone?: boolean;
 }
 
-/** t3code's own default for "Days of inactivity before auto-settle"
- *  (`sf.sidebarAutoSettleAfterDays ?? 3` in its settings panel). */
-export const AUTO_SETTLE_AFTER_DAYS = 3;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
- * Whether a chat needs no more attention right now. Ported from t3code's
- * settle decision: pending work always wins (not settled), then a manual pin,
- * then — only past AUTO_SETTLE_AFTER_DAYS of inactivity — auto-settled. A chat
- * that just finished is NOT settled yet; it ages into the shelf.
- *
- * Module-level and `now`-injected so it is testable without a store, which
- * matters more since Terminal.vue stopped filtering empty chats out of the
- * restore: this is now the only thing keeping an untouched chat from sitting
- * in the active list forever.
+ * Whether a chat needs no more attention right now. The rule (snooze, manual
+ * pin, a pending ask, 3 quiet days) is Go's — `settledSince` on the row
+ * (src-wails/chatattention.go, shared with the iOS app); this adds only what
+ * is live here: work in flight is never settled. `now`-injected so the 3-day
+ * flip happens on this clock with no event.
  */
 export function settledFor(s: ClaudeSession | undefined, now: number): boolean {
   if (!s) return false;
   if (s.busy || s.status === "running" || s.status === "waiting" || s.status === "permission") return false;
-  if ((s.snoozedUntil ?? 0) > now) return true;
-  if (s.settledOverride === "settled") return true;
-  if (s.settledOverride === "active") return false;
-  return now - (s.lastActivityAt ?? 0) >= AUTO_SETTLE_AFTER_DAYS * DAY_MS;
+  const since = s.settledSince ?? 0;
+  return since > 0 && now >= since;
 }
 
 /**
@@ -150,6 +154,13 @@ interface ChatRow {
   pr_number?: number;
   pr_url?: string;
   pr_state?: string;
+  turn_needs?: string;
+  net_wait_at?: number;
+  net_wait_reason?: string;
+  // Computed by Go (chatattention.go), read-only.
+  settled_since?: number;
+  needs_you?: boolean;
+  said_done?: boolean;
 }
 
 /**
@@ -193,6 +204,12 @@ function sessionFromRow(r: ChatRow): ClaudeSession {
     prNumber: r.pr_number || undefined,
     prUrl: r.pr_url || undefined,
     prState: (r.pr_state || undefined) as ClaudeSession["prState"],
+    turnNeeds: parseTurnNeeds(r.turn_needs),
+    netWaitAt: r.net_wait_at || undefined,
+    netWaitReason: (r.net_wait_reason || undefined) as ClaudeSession["netWaitReason"],
+    settledSince: r.settled_since ?? 0,
+    needsYou: !!r.needs_you,
+    saidDone: !!r.said_done,
     busy: false,
   };
 }
@@ -263,17 +280,26 @@ export function isActivitySync(
    * from here.
    */
   let reloadGen = 0;
+  // False while `sessions` is only the paired device's cached picture: persist()
+  // upserts every held row, and a days-old cached row written back would undo
+  // what happened since (un-archive, an old claude_session_id, a stale title).
+  let liveLoaded = false;
   async function reload() {
     // Calls run concurrently server-side, so replies can arrive out of order:
     // an older list landing last would drop a chat a newer one already showed.
     const gen = ++reloadGen;
+    // A paired device paints the last list it saw while the socket opens.
+    if (!sessions.value.length) sessions.value = (cachedRead<ChatRow[]>("list_chats") ?? []).map(sessionFromRow);
     let rows: ChatRow[];
     try {
-      rows = await invoke<ChatRow[]>("list_chats");
+      // The socket may still be reopening (wake from sleep, core restart): a single failed
+      // read used to leave the list empty until the next chats-changed or a restart.
+      rows = await retrying(() => invoke<ChatRow[]>("list_chats"));
     } catch {
       return; // no backend (browser-only dev) — leave whatever is loaded
     }
     if (gen !== reloadGen) return;
+    liveLoaded = true;
     const next: ClaudeSession[] = [];
     for (const row of rows) {
       const existing = sessions.value.find((s) => s.id === row.id);
@@ -358,6 +384,8 @@ export function isActivitySync(
    * (`delete_chat`, from remove()).
    */
   function persist() {
+    setConfig(ACTIVE_KEY, activeByWs.value);
+    if (!liveLoaded) return;
     selfWrites++;
     void invoke("save_chats", { chats: sessions.value.map(rowFromSession) })
       .catch(() => {
@@ -367,7 +395,6 @@ export function isActivitySync(
       .finally(() => {
         selfWrites--;
       });
-    setConfig(ACTIVE_KEY, activeByWs.value);
   }
 
   // Threads only: a sub-agent (`parentChatId` set) is reached through
@@ -574,15 +601,18 @@ export function isActivitySync(
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
     s.settledOverride = "settled";
+    s.settledSince = 1; // optimistic: our own save's chats-changed is skipped
     persist();
     // Manual settle only: stop the process now (Go refuses unless the phase is settled).
     void invoke("chat_sleep", { chatId: id }).catch(() => {});
   }
 
-  function unsettle(id: number) {
+  // `prev` (archive Undo) puts back the state from before settle() instead of pinning it active.
+  function unsettle(id: number, prev?: Pick<ClaudeSession, "settledOverride" | "settledSince">) {
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
-    s.settledOverride = "active";
+    s.settledOverride = prev ? prev.settledOverride : "active";
+    s.settledSince = prev ? prev.settledSince : 0;
     persist();
     if (s.snoozedUntil) snooze(id, 0); // "Move back to active" wins over a snooze
   }
@@ -592,6 +622,7 @@ export function isActivitySync(
     const s = sessions.value.find((x) => x.id === id);
     if (!s) return;
     s.snoozedUntil = until || undefined;
+    if (until) s.settledSince = 1; // an unsnooze waits for Go's re-read (chat_snooze emits chats-changed)
     void invoke("chat_snooze", { chatId: id, untilMs: until }).catch(() => {});
   }
 
@@ -636,7 +667,12 @@ export function isActivitySync(
     // restamped every thread to now, so yesterday's threads all read "Last
     // activity now". Same rule setModel already states for itself.
     const isActivity = isActivitySync(s, patch);
-    if (isActivity) s.lastActivityAt = Date.now();
+    if (isActivity) {
+      s.lastActivityAt = Date.now();
+      // ponytail: fresh activity = not settled until Go's next row says when
+      // (its 3-day clock restarts from this save; our own echo is skipped).
+      s.settledSince = 0;
+    }
     Object.assign(s, patch);
     if (isActivity || patch.claudeSessionId !== undefined || patch.title !== undefined || patch.messageCount !== undefined || patch.agentKind !== undefined || patch.transport !== undefined) {
       persist();

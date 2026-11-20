@@ -19,6 +19,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"burrow/internal/ctlauth"
 )
 
 type rpcRequest struct {
@@ -51,10 +53,11 @@ type verb struct {
 	Name    string `json:"name"`
 	Summary string `json:"summary"`
 	Args    []struct {
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Desc     string `json:"desc"`
-		Required bool   `json:"required"`
+		Name     string         `json:"name"`
+		Type     string         `json:"type"`
+		Desc     string         `json:"desc"`
+		Required bool           `json:"required"`
+		Schema   map[string]any `json:"schema"`
 	} `json:"args"`
 }
 
@@ -62,6 +65,7 @@ type verb struct {
 // initialize handshake so a client's logs show which app it's driving.
 type Server struct {
 	baseURL string
+	port    int
 	token   string
 	cwd     string
 	// chatID is BURROW_CHAT_ID, verbatim — "" outside a chat session. Kept as
@@ -79,6 +83,7 @@ type Server struct {
 func New(port int, token, cwd, chatID, version string) *Server {
 	return &Server{
 		baseURL: fmt.Sprintf("http://127.0.0.1:%d/v1/", port),
+		port:    port,
 		token:   token,
 		cwd:     cwd,
 		chatID:  chatID,
@@ -154,7 +159,14 @@ func (s *Server) listTools() ([]Tool, error) {
 			if t == "" {
 				t = "string"
 			}
-			props[a.Name] = map[string]any{"type": t, "description": a.Desc}
+			prop := map[string]any{"type": t, "description": a.Desc}
+			if a.Schema != nil {
+				prop = map[string]any{"description": a.Desc}
+				for k, v := range a.Schema {
+					prop[k] = v
+				}
+			}
+			props[a.Name] = prop
 			if a.Required {
 				required = append(required, a.Name)
 			}
@@ -217,6 +229,20 @@ func (s *Server) callTool(req rpcRequest) *rpcResponse {
 	}}
 }
 
+// signer signs with the chat's / tab's own key (BURROW_CALLER_TOKEN) when this
+// process has one, else with control.token.
+func (s *Server) signer() ctlauth.Client {
+	c := ctlauth.Client{Port: s.port, Key: s.token, HTTP: s.client}
+	if key := strings.TrimSpace(os.Getenv("BURROW_CALLER_TOKEN")); key != "" {
+		if id := strings.TrimSpace(s.chatID); id != "" {
+			c.Key, c.Caller = key, "chat:"+id
+		} else if id := strings.TrimSpace(os.Getenv("BURROW_PTY_ID")); id != "" {
+			c.Key, c.Caller = key, "pty:"+id
+		}
+	}
+	return c
+}
+
 func (s *Server) post(verb string, body any, out any) error {
 	payload := []byte("{}")
 	if body != nil {
@@ -230,9 +256,10 @@ func (s *Server) post(verb string, body any, out any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.token)
 
-	resp, err := s.client.Do(req)
+	// Challenge-response: the token never travels, and a reply counts only
+	// once the core proved it holds the same key (ctlauth.Client.Do).
+	resp, err := s.signer().Do(req)
 	if err != nil {
 		return err
 	}

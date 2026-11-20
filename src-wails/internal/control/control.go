@@ -41,9 +41,13 @@ func (s Scope) Has(want Scope) bool { return s&want != 0 }
 // the CLI's `--help`, and argument validation, so a verb documents itself once.
 type Arg struct {
 	Name     string
-	Type     string // "string" | "integer" | "boolean"
+	Type     string // "string" | "integer" | "boolean" | "array"
 	Desc     string
 	Required bool
+	// Schema, when set, is the argument's full JSON schema for MCP (an array of
+	// objects can't be said with Type alone). The CLI passes such an arg as a
+	// JSON string; Params.JSON reads both.
+	Schema any
 }
 
 // Verb is a single callable app action.
@@ -134,6 +138,13 @@ type Exec interface {
 // reaches an already-running agent.
 type PTYWriter interface {
 	WritePty(ptyID string, text string) error
+}
+
+// PTYScreen reads a terminal's screen as plain text in the backend (the
+// daemon's emulator), so tab_output works with no window open. Optional: nil
+// or any error = ask the UI instead (a daemon built without the emulator).
+type PTYScreen interface {
+	ScreenText(ptyID string, lines int) (string, error)
 }
 
 // PTYLister reports which PTY ids the daemon currently knows about — positive
@@ -255,8 +266,16 @@ type Deps struct {
 	// nil means "no proof either way", so absence of the capability itself
 	// must never be read as absence of the process.
 	PTYs PTYLister
+	// Screen is optional: nil = tab_output always reads the mounted xterm.
+	Screen PTYScreen
 	// Secrets backs secret_request. nil = it refuses.
 	Secrets Secrets
+	// TurnNeeds backs end_turn. nil = it refuses.
+	TurnNeeds TurnNeedsStore
+	// Pins backs pin. nil = it refuses.
+	Pins Pins
+	// ActivityDir is <app-data>/activity, read by the activity verb. "" = it refuses.
+	ActivityDir string
 }
 
 // Core is the verb registry plus the dependencies verbs run against.
@@ -274,6 +293,8 @@ func New(deps Deps) *Core {
 	c.register(selfVerbs(c)...)
 	c.register(chatVerbs(c)...)
 	c.register(secretVerbs(c)...)
+	c.register(turnVerbs(c)...)
+	c.register(activityVerbs(c)...)
 	return c
 }
 

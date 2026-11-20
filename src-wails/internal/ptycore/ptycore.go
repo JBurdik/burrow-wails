@@ -5,10 +5,12 @@
 package ptycore
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
@@ -22,6 +24,10 @@ type Events interface {
 	// written, so a client that lost some can ask Since for exactly that.
 	OnData(id string, off uint64, data []byte)
 	OnExit(id string)
+	// OnAltExit: the PTY just left the alt screen (a TUI exited). A view that
+	// attached while it was up has only the alt screen — the primary is
+	// unreachable then (plan 010 Q2) — and re-attaches to get it. `vt` only.
+	OnAltExit(id string)
 }
 
 type Manager struct {
@@ -35,10 +41,43 @@ type session struct {
 	cmd  *exec.Cmd
 	file *os.File
 	ring *byteRing
+	// vtMu makes "ring end + emulator state" one atomic read: pump writes both
+	// under it, so a snapshot's offset is exactly where its bytes stop. vt is
+	// nil without the `vt` build tag (or if libghostty failed to start).
+	vtMu sync.Mutex
+	vt   *screen
+	alt  bool // the emulator's alt screen was up after the last write
 }
 
+// ErrUnsupported: this daemon has no terminal emulator for the PTY (built
+// without the `vt` tag). Callers fall back to the UI / cold ring replay.
+var ErrUnsupported = errors.New("pty screen unsupported")
+
 func NewManager(events Events) *Manager {
-	return &Manager{sessions: make(map[string]*session), events: events}
+	m := &Manager{sessions: make(map[string]*session), events: events}
+	go m.compressLoop()
+	return m
+}
+
+// compressLoop compresses every emulator's cold scrollback pages (plan 010:
+// ~8.8 MB resident → ~1.6 MB at the 8 MiB cap). Incremental, so a page already
+// compressed costs nothing. ponytail: fixed 30 s for every PTY, busy or not.
+func (m *Manager) compressLoop() {
+	for range time.Tick(30 * time.Second) {
+		m.mu.Lock()
+		all := make([]*session, 0, len(m.sessions))
+		for _, s := range m.sessions {
+			all = append(all, s)
+		}
+		m.mu.Unlock()
+		for _, s := range all {
+			s.vtMu.Lock()
+			if s.vt != nil {
+				s.vt.compress()
+			}
+			s.vtMu.Unlock()
+		}
+	}
 }
 
 func errUnknown(id string) error { return fmt.Errorf("unknown pty id: %s", id) }
@@ -86,7 +125,7 @@ func (m *Manager) Create(id, cwd string, cols, rows uint16, env []string) error 
 		return err
 	}
 
-	sess := &session{id: id, cmd: c, file: f, ring: newByteRing(ringSize)}
+	sess := &session{id: id, cmd: c, file: f, ring: newByteRing(ringSize), vt: newScreen(cols, rows)}
 	m.mu.Lock()
 	m.sessions[id] = sess
 	m.mu.Unlock()
@@ -102,12 +141,30 @@ func (m *Manager) pump(sess *session) {
 		n, err := sess.file.Read(buf)
 		if n > 0 {
 			data := append([]byte(nil), buf[:n]...)
-			m.events.OnData(sess.id, sess.ring.write(data), data)
+			sess.vtMu.Lock()
+			off := sess.ring.write(data)
+			altExit := false
+			if sess.vt != nil {
+				sess.vt.write(data)
+				alt := sess.vt.alt()
+				altExit, sess.alt = sess.alt && !alt, alt
+			}
+			sess.vtMu.Unlock()
+			m.events.OnData(sess.id, off, data)
+			if altExit {
+				m.events.OnAltExit(sess.id) // after the data: the resync covers it
+			}
 		}
 		if err != nil {
 			break
 		}
 	}
+	sess.vtMu.Lock()
+	if sess.vt != nil {
+		sess.vt.close()
+		sess.vt = nil
+	}
+	sess.vtMu.Unlock()
 	m.mu.Lock()
 	delete(m.sessions, sess.id)
 	m.mu.Unlock()
@@ -128,7 +185,77 @@ func (m *Manager) Resize(id string, cols, rows uint16) error {
 	if !ok {
 		return errUnknown(id)
 	}
-	return pty.Setsize(sess.file, &pty.Winsize{Cols: cols, Rows: rows})
+	// The PTY's size IS the emulator's size (one size per PTY, no per-client
+	// emulators): both change together.
+	if err := pty.Setsize(sess.file, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
+		return err
+	}
+	sess.vtMu.Lock()
+	if sess.vt != nil {
+		sess.vt.resize(cols, rows)
+	}
+	sess.vtMu.Unlock()
+	return nil
+}
+
+// ScreenText is the tail of what the PTY's active screen shows, as plain text
+// (soft wraps joined, rows right-trimmed, trailing blank rows dropped) — what
+// tab_output returns, readable with no window open.
+func (m *Manager) ScreenText(id string, lines int) (string, error) {
+	sess, ok := m.get(id)
+	if !ok {
+		return "", errUnknown(id)
+	}
+	sess.vtMu.Lock()
+	defer sess.vtMu.Unlock()
+	if sess.vt == nil {
+		return "", ErrUnsupported
+	}
+	return sess.vt.text(lines)
+}
+
+// ScreenFlags: the alt screen is up / the cursor is at a marked shell prompt,
+// from the emulator. Both false without one (or for an unknown id) — the
+// foreground poll's tie-breakers, never stronger than the process name.
+func (m *Manager) ScreenFlags(id string) (alt, atPrompt bool) {
+	sess, ok := m.get(id)
+	if !ok {
+		return false, false
+	}
+	sess.vtMu.Lock()
+	defer sess.vtMu.Unlock()
+	if sess.vt == nil {
+		return false, false
+	}
+	return sess.vt.alt(), sess.vt.atPrompt()
+}
+
+// Snapshot rebuilds a PTY's screen in a fresh xterm: VT bytes for the active
+// screen + history + modes, cut at ring offset Off — every pty-data chunk at or
+// past Off follows it with no gap and no overlap.
+type Snapshot struct {
+	Off        uint64
+	VT         []byte
+	Cols, Rows uint16
+	Alt        bool
+}
+
+func (m *Manager) Attach(id string) (Snapshot, error) {
+	sess, ok := m.get(id)
+	if !ok {
+		return Snapshot{}, errUnknown(id)
+	}
+	sess.vtMu.Lock()
+	defer sess.vtMu.Unlock()
+	if sess.vt == nil {
+		return Snapshot{}, ErrUnsupported
+	}
+	vt, cols, rows, alt, err := sess.vt.snapshot()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	// ring.end without ring.mu: its only writer (pump) also holds vtMu.
+	return Snapshot{Off: sess.ring.end, VT: vt, Cols: cols, Rows: rows, Alt: alt}, nil
 }
 
 func (m *Manager) Kill(id string) error {

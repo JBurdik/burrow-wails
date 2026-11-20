@@ -34,13 +34,25 @@ var errNoTurnToSteer = errors.New("no running turn to steer")
 
 // ChatSteer delivers text into chatID's running turn. On any error nothing was
 // sent and nothing was recorded.
-func (a *App) ChatSteer(chatID int64, text string, images []string) error {
+// A non-empty clientID already accepted for the chat is a no-op success
+// (chatsubmit.go's claimClientID).
+func (a *App) ChatSteer(chatID int64, text string, images []string, clientID string) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
 	}
+	_, finish, dup := a.claimClientID(chatID, clientID)
+	if dup {
+		return nil
+	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
+	err = a.withSendingClientID(id, clientID, func() error { return a.chatSteerLocked(c, id, text, images) })
+	finish(err == nil, nil)
+	return err
+}
+
+func (a *App) chatSteerLocked(c Chat, id, text string, images []string) error {
 	if !a.chatTurnRunning(id) {
 		return errNoTurnToSteer
 	}
@@ -100,6 +112,6 @@ func (a *App) codexSteer(id, text string, images []string) error {
 		return fmt.Errorf("codex refused the steer: %w", err)
 	}
 	a.resetCodexTurnWatchdog(id, sess)
-	a.emitChatLine(id, chatUserKind, text)
+	a.emitUserLine(id, text, images, a.sendingClientID(id))
 	return nil
 }

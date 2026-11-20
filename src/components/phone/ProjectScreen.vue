@@ -43,7 +43,7 @@ const rows = computed(() => [
   <div class="flex min-h-0 flex-1 flex-col bg-base">
     <PhoneHeader title="Project" />
     <div class="flex-1 overflow-y-auto">
-      <button class="flex min-h-[64px] w-full items-center gap-3 border-b border-border px-4 py-2 text-left active:bg-hover" @click="picking = true">
+      <button class="flex min-h-[56px] w-full items-center gap-3 border-b border-border px-4 py-2 text-left active:bg-hover" @click="picking = true">
         <span class="flex min-w-0 flex-1 flex-col">
           <span class="truncate text-[16px] font-semibold text-foreground">{{ ws.active?.name ?? "Pick a project" }}</span>
           <span v-if="ownGit && git.branch" class="truncate font-mono text-[12px] text-muted-foreground">
@@ -56,7 +56,7 @@ const rows = computed(() => [
         <button
           v-for="r in rows"
           :key="r.surface"
-          class="flex min-h-[52px] w-full items-center gap-3 border-b border-border/60 px-4 text-left active:bg-hover"
+          class="flex min-h-[46px] w-full items-center gap-3 border-b border-border/60 px-4 text-left active:bg-hover"
           @click="router.push(`/project/${r.surface}`)"
         >
           <component :is="r.icon" :size="20" class="shrink-0 text-secondary-foreground" />

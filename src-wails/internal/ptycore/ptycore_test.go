@@ -13,6 +13,7 @@ type nopEvents struct{}
 
 func (nopEvents) OnData(string, uint64, []byte) {}
 func (nopEvents) OnExit(string)                 {}
+func (nopEvents) OnAltExit(string)              {}
 
 var shellRE = regexp.MustCompile(`^(zsh|bash|sh|fish|csh|tcsh|dash)$`)
 
@@ -96,7 +97,8 @@ func (r *recEvents) OnData(_ string, off uint64, data []byte) {
 	}
 	r.out = append(r.out, data...)
 }
-func (*recEvents) OnExit(string) {}
+func (*recEvents) OnExit(string)    {}
+func (*recEvents) OnAltExit(string) {}
 
 // Every chunk's offset continues where the previous one ended, and Since hands
 // back exactly the bytes that were streamed — the contract a reconnecting

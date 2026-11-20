@@ -1,0 +1,370 @@
+import CryptoKit
+import SwiftUI
+
+// Offline support: a per-machine folder in Application Support holding the
+// outbox (messages typed while the socket was down) and a cache of the last
+// snapshot + recent transcript pages, so launch paints before the socket opens.
+// No credentials or tokens ever go here (those stay in the Keychain).
+
+/// `<Application Support>/burrow/<sha256(baseURL) prefix>/`: another paired Mac
+/// gets its own folder, so its outbox and cache never mix with this one's.
+enum LocalStore {
+    static func dir(_ creds: Credentials?) -> URL? {
+        guard let creds else { return nil }
+        let key = SHA256.hash(data: Data(creds.baseURL.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("burrow/\(key)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url.appendingPathComponent("chats"), withIntermediateDirectories: true)
+        return url
+    }
+    static func read(_ url: URL) -> Any? { (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) } }
+    static func write(_ obj: Any, to url: URL) {
+        if let d = try? JSONSerialization.data(withJSONObject: obj) { try? d.write(to: url, options: .atomic) }
+    }
+}
+
+/// A message held for delivery (offline, behind earlier held ones, or a reply lost
+/// to a drop); delivered via chat_submit on the next open, `id` as its clientId.
+struct OutboxItem: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var chatId: Int
+    var text: String
+    var images: [String]
+    /// Last server refusal (e.g. the chat is gone); kept for the user to delete.
+    var error: String?
+    /// An end_turn card answer: delivered via chat_answer_turn (Go composes the
+    /// message from the stored card); `text` is only its preview. A changed card
+    /// is a refusal like any other.
+    var answer: HeldAnswer?
+
+    /// The call that delivers it, with `id` as the clientId.
+    var call: (String, [String: Any]) {
+        guard let answer else {
+            return ("chat_submit", ["chatId": chatId, "text": text, "images": images, "clientId": id.uuidString])
+        }
+        return ("chat_answer_turn", ["chatId": chatId, "picks": answer.picks.map(\.wire), "extra": answer.extra,
+                                     "images": images, "clientId": id.uuidString])
+    }
+}
+
+/// One ask's answer for chat_answer_turn: picked option labels, else free text.
+struct TurnPickItem: Codable, Hashable {
+    var index: Int
+    var options: [String]?
+    var text: String?
+    /// Done card: ask what these follow-ups mean instead of picking them.
+    var ask: Bool? = nil
+
+    var wire: [String: Any] {
+        var d: [String: Any] = ["index": index]
+        if let options { d["options"] = options }
+        if let text { d["text"] = text }
+        if ask == true { d["ask"] = true }
+        return d
+    }
+}
+
+struct HeldAnswer: Codable, Hashable {
+    var picks: [TurnPickItem]
+    var extra: String
+
+    /// What the echo / held row shows until Go's composed text is known
+    /// (answerPreview in turnNeeds.ts).
+    var preview: String {
+        (picks.map { $0.options.map { $0.joined(separator: ", ") } ?? ($0.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+            + [extra.trimmingCharacters(in: .whitespacesAndNewlines)])
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+}
+
+extension Workspace {
+    init(_ d: [String: Any]) {
+        self.init(id: int(d["id"]), name: d["name"] as? String ?? "", parentId: (d["parent_id"] as? NSNumber)?.intValue,
+                  path: d["path"] as? String ?? "", icon: d["icon"] as? String)
+    }
+    var dict: [String: Any] {
+        var d: [String: Any] = ["id": id, "name": name, "path": path]
+        if let parentId { d["parent_id"] = parentId }
+        if let icon { d["icon"] = icon }
+        return d
+    }
+}
+
+extension Phase {
+    var dict: [String: Any] { ["state": state, "detail": detail, "turn_ended_at": turnEndedAt, "updated_at": updatedAt] }
+}
+
+extension AppModel {
+    static let cachedChats = 20, cachedMessages = 150
+
+    var online: Bool { client?.isOpen == true }
+
+    /// Launch / pair: outbox + last snapshot of this machine, before the socket opens.
+    func restoreLocal() {
+        guard let dir = LocalStore.dir(creds) else { return }
+        outbox = (try? Data(contentsOf: dir.appendingPathComponent("outbox.json"))).map(Self.decodeOutbox) ?? []
+        guard let d = LocalStore.read(dir.appendingPathComponent("snapshot.json")) as? [String: Any] else { return }
+        workspaces = (d["workspaces"] as? [[String: Any]] ?? []).map(Workspace.init)
+        phases = Self.parsePhases(d["phases"])
+        seen = Dictionary(uniqueKeysWithValues: (d["seen"] as? [String: Any] ?? [:]).compactMap { k, v in Int(k).map { ($0, dbl(v)) } })
+        rawChats = d["chats"] as? [[String: Any]] ?? []
+        chats = rawChats.map(Chat.init)
+    }
+
+    /// One unreadable item (a shape from another build) must not take the whole
+    /// outbox with it: restoreLocal's next save would overwrite the file.
+    static func decodeOutbox(_ data: Data) -> [OutboxItem] {
+        guard let arr = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return [] }
+        return arr.compactMap { el in
+            (try? JSONSerialization.data(withJSONObject: el)).flatMap { try? JSONDecoder().decode(OutboxItem.self, from: $0) }
+        }
+    }
+
+    static func parsePhases(_ raw: Any?) -> [Int: Phase] {
+        var ph: [Int: Phase] = [:]
+        for (k, v) in raw as? [String: Any] ?? [:] where k.hasPrefix("chat:") {
+            if let id = Int(k.dropFirst(5)), let d = v as? [String: Any] { ph[id] = Phase(d) }
+        }
+        return ph
+    }
+
+    /// After a snapshot and when the app leaves the foreground.
+    func saveCache() {
+        guard let dir = LocalStore.dir(creds), !rawChats.isEmpty else { return }
+        let snap: [String: Any] = [
+            "workspaces": workspaces.map(\.dict),
+            "phases": Dictionary(uniqueKeysWithValues: phases.map { ("chat:\($0.key)", $0.value.dict) }),
+            "seen": Dictionary(uniqueKeysWithValues: seen.map { (String($0.key), $0.value) }),
+            "chats": rawChats,
+        ]
+        let pages = dirtyPages.compactMap { id in pageCache[id].map { (id, $0) } }
+        dirtyPages = []
+        DispatchQueue.global(qos: .utility).async {
+            LocalStore.write(snap, to: dir.appendingPathComponent("snapshot.json"))
+            let chatsDir = dir.appendingPathComponent("chats")
+            for (id, page) in pages { LocalStore.write(page, to: chatsDir.appendingPathComponent("\(id).json")) }
+            // Keep the most recently written pages only.
+            let fm = FileManager.default
+            let files = (try? fm.contentsOfDirectory(at: chatsDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            let byAge = files.sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a > b
+            }
+            for f in byAge.dropFirst(Self.cachedChats) { try? fm.removeItem(at: f) }
+        }
+    }
+
+    /// Unpair: drop the cache, keep the outbox file (re-pairing this Mac delivers it).
+    func clearCache() {
+        if let dir = LocalStore.dir(creds) {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("snapshot.json"))
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("chats"))
+        }
+        pageCache = [:]; dirtyPages = []; rawChats = []; outbox = []
+    }
+
+    // MARK: transcript pages
+
+    /// The newest load_chat_messages_page result seen for a chat (memory, else disk).
+    func cachedPage(_ chat: Int) -> [String: Any]? {
+        if let p = pageCache[chat] { return p }
+        guard let dir = LocalStore.dir(creds),
+              let p = LocalStore.read(dir.appendingPathComponent("chats/\(chat).json")) as? [String: Any] else { return nil }
+        pageCache[chat] = p
+        return p
+    }
+
+    /// Kept in memory on a page load, a settled turn and leaving the chat; written to disk by
+    /// saveCache. `rev` lets the next open catch up with chat_subscribe from it.
+    func cachePage(_ chat: Int, _ page: [String: Any]) {
+        var msgs = page["messages"] as? [[String: Any]] ?? []
+        let drop = max(0, msgs.count - Self.cachedMessages)
+        msgs = msgs.dropFirst(drop).map { m in
+            guard let out = m["toolOutput"] as? String, out.count > 2000 else { return m }
+            var m = m; m["toolOutput"] = String(out.prefix(2000)); return m // the row shows 1500
+        }
+        pageCache[chat] = ["start": int(page["start"]) + drop, "messages": msgs, "rev": page["rev"] ?? 0]
+        dirtyPages.insert(chat)
+    }
+
+    // MARK: outbox
+
+    /// `id` is also the item's `clientId` on the wire: every retry carries the same
+    /// one, so Go drops a repeat (a reply lost to a drop no longer means two copies).
+    func enqueue(_ chat: Int, _ text: String, _ images: [String] = [], id: UUID = UUID(), answer: HeldAnswer? = nil) {
+        outbox.append(OutboxItem(id: id, chatId: chat, text: text, images: images, answer: answer))
+        saveOutbox()
+        if online { Task { await flushOutbox() } }
+    }
+
+    func removePending(_ id: UUID) {
+        outbox.removeAll { $0.id == id }
+        saveOutbox()
+    }
+
+    private func saveOutbox() {
+        guard let dir = LocalStore.dir(creds), let d = try? JSONEncoder().encode(outbox) else { return }
+        try? d.write(to: dir.appendingPathComponent("outbox.json"), options: .atomic)
+    }
+
+    enum Submitted { case sent, queued, held }
+
+    /// One user message through chat_submit (Go sends it to a settled chat, else
+    /// queues it) with its client id `cid`. Held in the outbox, under the same id,
+    /// when offline, when this chat already has items waiting there (a new message
+    /// must not overtake them), or when the socket dropped mid-call (the reply is
+    /// lost, the request may have landed: the retry is deduped by Go). A refusal throws.
+    @MainActor func submitOrHold(_ chat: Int, _ text: String, _ images: [String], cid: UUID = UUID()) async throws -> Submitted {
+        guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
+            enqueue(chat, text, images, id: cid); return .held
+        }
+        do {
+            let r = try await client.call("chat_submit", ["chatId": chat, "text": text, "images": images, "clientId": cid.uuidString])
+            return (r as? [String: Any])?["sent"] as? Bool == false ? .queued : .sent
+        } catch BurrowError.closed {
+            enqueue(chat, text, images, id: cid); return .held
+        }
+    }
+
+    /// The end_turn card's answer, like a composer send: echo (the preview, then
+    /// Go's composed text from the reply) until Go's row with the client id lands;
+    /// held under the same id offline / behind held items / on a mid-call drop.
+    /// A refusal (the card changed) throws.
+    @MainActor func answerTurn(_ chat: Int, _ picks: [TurnPickItem], extra: String, images: [String]) async throws -> Submitted {
+        let cid = UUID()
+        let answer = HeldAnswer(picks: picks, extra: extra)
+        guard let client, client.isOpen, !outbox.contains(where: { $0.chatId == chat }) else {
+            enqueue(chat, answer.preview, images, id: cid, answer: answer); return .held
+        }
+        let echo = !phase(chat).inFlight
+        if echo { localSend(chat, answer.preview, clientId: cid) }
+        let item = OutboxItem(id: cid, chatId: chat, text: answer.preview, images: images, answer: answer)
+        do {
+            let (cmd, args) = item.call
+            let r = try await client.call(cmd, args) as? [String: Any]
+            if r?["sent"] as? Bool == false {
+                if echo { localSend(chat, nil, clientId: cid) }
+                nudgeChat(chat)
+                return .queued
+            }
+            if echo, let t = r?["text"] as? String, !t.isEmpty { localSend(chat, t, clientId: cid) }
+            if let c = self.chat(chat) { startActivity(c) }
+            nudgeChat(chat)
+            return .sent
+        } catch BurrowError.closed {
+            if echo { localSend(chat, nil, clientId: cid) }
+            enqueue(chat, answer.preview, images, id: cid, answer: answer)
+            return .held
+        } catch {
+            if echo { localSend(chat, nil, clientId: cid) }
+            throw error
+        }
+    }
+
+    /// On every socket open (and after an enqueue while online): each pending item
+    /// in order through chat_submit / chat_answer_turn (Go sends it or queues it), with
+    /// its clientId. Removed only after success; a refusal keeps its error and holds
+    /// that chat's later items back (others go on); a dropped socket stops the pass.
+    @MainActor func flushOutbox() async {
+        if flushing { flushAgain = true; return }
+        flushing = true; defer { flushing = false }
+        repeat {
+            flushAgain = false
+            var blocked = Set<Int>()
+            for id in outbox.map(\.id) {
+                guard let client, client.isOpen else { return }
+                guard let item = outbox.first(where: { $0.id == id }), !blocked.contains(item.chatId) else { continue }
+                do {
+                    let (cmd, args) = item.call
+                    try await client.call(cmd, args)
+                    outbox.removeAll { $0.id == id }
+                    nudgeChat(item.chatId)
+                } catch BurrowError.closed {
+                    return
+                } catch {
+                    blocked.insert(item.chatId)
+                    if let i = outbox.firstIndex(where: { $0.id == id }) { outbox[i].error = error.localizedDescription }
+                }
+                saveOutbox()
+            }
+        } while flushAgain
+    }
+
+    /// Tap on the banner: reconnect now, skipping the backoff.
+    func forceReconnect() {
+        if let client { client.reconnect() } else { connect() }
+    }
+}
+
+/// Above the threads list and the chat: nothing while connected; after 1.5 s down
+/// "Reconnecting…", after 3 s "Offline". Tap = reconnect now.
+struct ConnectionBanner: View {
+    @Environment(AppModel.self) private var model
+    @State private var shown: Kind?
+    @State private var attempt = 0
+
+    enum Kind { case reconnecting, offline }
+
+    var body: some View {
+        Group {
+            if let shown, model.creds != nil {
+                Button {
+                    self.shown = .reconnecting; attempt += 1
+                    model.forceReconnect()
+                } label: {
+                    HStack(spacing: 6) {
+                        if shown == .reconnecting { ProgressView().controlSize(.mini) } else { Image(systemName: "wifi.slash") }
+                        Text(shown == .reconnecting ? "Reconnecting…" : "Offline")
+                        if !model.outbox.isEmpty { Text("· \(model.outbox.count) waiting").foregroundStyle(.secondary) }
+                        if shown == .offline { Text("· Tap to retry").foregroundStyle(.secondary) }
+                    }
+                    .font(.caption.weight(.medium))
+                    .frame(maxWidth: .infinity).padding(.vertical, 5)
+                    .background(.bar)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityHint("Reconnects to the Mac")
+            }
+        }
+        .animation(.default, value: shown)
+        .task(id: "\(model.connected)-\(attempt)") {
+            guard !model.connected else { shown = nil; return }
+            do {
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                if shown == nil { shown = .reconnecting }
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                shown = .offline
+            } catch {}
+        }
+    }
+}
+
+/// Outbox rows for one chat, inside QueuePanel.
+struct PendingOutboxRows: View {
+    @Environment(AppModel.self) private var model
+    let chatId: Int
+
+    var body: some View {
+        ForEach(model.outbox.filter { $0.chatId == chatId }) { item in
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.text.isEmpty ? "(attachment)" : item.text).font(.callout).lineLimit(2)
+                    Label(item.error ?? "Waiting for connection", systemImage: item.error == nil ? "clock" : "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(item.error == nil ? Color.secondary : Color.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button(role: .destructive) { model.removePending(item.id) } label: {
+                    Image(systemName: "trash").frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Delete pending message")
+            }
+            .padding(8)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .opacity(0.8)
+        }
+    }
+}

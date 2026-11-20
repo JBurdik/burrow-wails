@@ -9,7 +9,7 @@ package daemonproto
 // Request is a client -> daemon message. Kind selects which fields matter.
 type Request struct {
 	ReqID string   `json:"reqId"`
-	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground" | "version" | "since" | "privacy"
+	Kind  string   `json:"kind"` // "spawn" | "write" | "resize" | "kill" | "list" | "foreground" | "version" | "since" | "privacy" | "screen_text" | "attach"
 	ID    string   `json:"id,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
 	Env   []string `json:"env,omitempty"`
@@ -17,6 +17,7 @@ type Request struct {
 	Cols  uint16   `json:"cols,omitempty"`
 	Rows  uint16   `json:"rows,omitempty"`
 	Since uint64   `json:"since,omitempty"` // for "since"
+	Lines int      `json:"lines,omitempty"` // for "screen_text": trailing rows, 0 = all
 }
 
 // Response is a daemon -> client reply to a Request (matched by ReqID).
@@ -42,11 +43,27 @@ type Response struct {
 	// offset when the daemon's ring no longer holds all of it).
 	Off  uint64 `json:"off,omitempty"`
 	Data []int  `json:"data,omitempty"`
+	// "screen_text": the active screen as plain text. "attach": VT bytes that
+	// rebuild the screen in a fresh xterm (base64 on the wire — []byte), cut at
+	// ring offset Off, at the emulator's Cols x Rows, Alt = alt screen up.
+	// Both answer the error "pty screen unsupported" from a daemon built
+	// without the `vt` tag (and an older daemon "unknown request kind").
+	Text string `json:"text,omitempty"`
+	VT   []byte `json:"vt,omitempty"`
+	Cols uint16 `json:"cols,omitempty"`
+	Rows uint16 `json:"rows,omitempty"`
+	Alt  bool   `json:"alt,omitempty"`
+	// "foreground" (with the emulator): Alt as above, AtPrompt = the cursor is
+	// on an OSC 133-marked shell prompt.
+	AtPrompt bool `json:"atPrompt,omitempty"`
+	// "version": this daemon was built with the emulator (`vt` tag) — attach
+	// and screen_text work. Absent from an older / ring-only daemon.
+	Emulator bool `json:"emulator,omitempty"`
 }
 
 // Frame is an unsolicited daemon -> client push: PTY output or exit.
 type Frame struct {
-	Event string `json:"event"` // "pty-data" | "pty-exit"
+	Event string `json:"event"` // "pty-data" | "pty-exit" | "pty-resync" (left the alt screen)
 	ID    string `json:"id"`
 	Data  []int  `json:"data,omitempty"`
 	// Off is the offset of Data's first byte in the PTY's whole output. A

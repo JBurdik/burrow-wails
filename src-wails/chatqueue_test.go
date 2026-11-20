@@ -39,7 +39,7 @@ type imgSink struct {
 	err  error
 }
 
-func (s *imgSink) send(chatID int64, text string, _ []string) error {
+func (s *imgSink) send(chatID int64, text string, _ []string, _ string, _ *autoSend) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -54,9 +54,9 @@ func TestChatQueueDrainsAfterSettle(t *testing.T) {
 	c, _ := a.CreateChat(Chat{WorkspaceID: ws, Transport: "claude-cli"})
 	a.phases.Apply(chatKey(c.ID), agentphase.Event{Kind: agentphase.HookRunning})
 
-	x, _ := a.ChatQueueAdd(c.ID, "x", nil)
-	y, _ := a.ChatQueueAdd(c.ID, "y", []string{"data:image/png;base64,AA=="})
-	z, _ := a.ChatQueueAdd(c.ID, "z", nil)
+	x, _ := a.ChatQueueAdd(c.ID, "x", nil, "")
+	y, _ := a.ChatQueueAdd(c.ID, "y", []string{"data:image/png;base64,AA=="}, "")
+	z, _ := a.ChatQueueAdd(c.ID, "z", nil, "")
 	if err := a.ChatQueueReorder(c.ID, []int64{z.ID, x.ID, y.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,8 @@ func TestChatQueueDrainsAfterSettle(t *testing.T) {
 func TestChatQueueFailedSendRequeuesAtHead(t *testing.T) {
 	a, ws := noticeApp(t)
 	c, _ := a.CreateChat(Chat{WorkspaceID: ws, Transport: "claude-cli"})
-	first, _ := a.ChatQueueAdd(c.ID, "first", nil)
-	a.ChatQueueAdd(c.ID, "second", nil)
+	first, _ := a.ChatQueueAdd(c.ID, "first", nil, "")
+	a.ChatQueueAdd(c.ID, "second", nil, "")
 
 	s := &imgSink{err: errors.New("agent won't start")}
 	for i := 0; i < chatQueueMaxAttempts+2; i++ {
@@ -127,7 +127,7 @@ func TestDeliveryNoticeThenQueueThenSchedule(t *testing.T) {
 	assistantSays(t, a, child.ID, "done")
 
 	scheduleAdapter{a}.addAt(parent.ID, "scheduled", time.Now().Add(-time.Minute))
-	a.ChatQueueAdd(parent.ID, "queued", nil)
+	a.ChatQueueAdd(parent.ID, "queued", nil, "")
 	step(a, child.ID, ProviderRuntimeEvent{Type: EvtTextDelta})
 	step(a, child.ID, ProviderRuntimeEvent{Type: EvtTurnCompleted})
 
@@ -140,7 +140,7 @@ func TestDeliveryNoticeThenQueueThenSchedule(t *testing.T) {
 	}
 
 	other, _ := a.CreateChat(Chat{WorkspaceID: ws, Transport: "claude-cli"})
-	a.ChatQueueAdd(other.ID, "orphan", nil)
+	a.ChatQueueAdd(other.ID, "orphan", nil, "")
 	if err := a.DeleteChat(other.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -117,7 +117,7 @@ func (r chatRuntimeAdapter) SpawnSubagent(req control.SpawnRequest) (control.Spa
 }
 
 func (r chatRuntimeAdapter) SendToChat(chatID int64, text string) error {
-	return r.a.ChatSend(chatID, text, nil)
+	return r.a.ChatSend(chatID, text, nil, "")
 }
 
 // pickSpawnAgent is spawn's agent choice, shared with list_agents so the
@@ -193,6 +193,13 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 		inherit = parent
 	}
 
+	// A sub-agent runs headless: plan mode parks it on an ExitPlanMode only the
+	// user can answer. Agents asked for it on "read-only" tasks (the task text
+	// says read-only), so an agent's plan means "the parent's mode". A profile
+	// the user set to plan still applies.
+	if req.PermissionMode == "plan" {
+		req.PermissionMode = ""
+	}
 	if req.PermissionMode != "" {
 		if permRank(req.PermissionMode) < 0 {
 			return none, fmt.Errorf("Unknown permission mode %q. Use plan, default, acceptEdits, auto, dontAsk or full-access.", req.PermissionMode)
@@ -247,7 +254,7 @@ func (a *App) spawnSubagent(req control.SpawnRequest) (control.SpawnedChat, erro
 	if err != nil {
 		return none, err
 	}
-	if err := a.ChatSend(c.ID, task, nil); err != nil {
+	if err := a.ChatSend(c.ID, task, nil, ""); err != nil {
 		// A row whose process never started is a sub-agent nobody can reach.
 		_ = a.DeleteChat(c.ID)
 		return none, err

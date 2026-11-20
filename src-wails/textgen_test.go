@@ -33,6 +33,7 @@ func TestTextGenFallback(t *testing.T) {
 		"claude::claude::claude-haiku-4-5-20251001": "",
 		"claude::claude::claude-opus-5-5":           "",
 		"codex::codex::claude-haiku-5-5":            "",
+		"apple::apple::system":                      "claude::claude::claude-haiku-5-5",
 	}
 	for in, want := range cases {
 		if got := textGenFallback(in); got != want {

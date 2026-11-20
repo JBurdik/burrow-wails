@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
-import { PhChatCircleText, PhX, PhArrowSquareOut, PhQuotes, PhQuestion } from "@phosphor-icons/vue";
+import { PhChatCircleText, PhX, PhArrowSquareOut, PhQuotes, PhQuestion, PhLightbulb } from "@phosphor-icons/vue";
 import { selectedTranscriptQuote, type TranscriptQuote, type TranscriptNote } from "@/lib/transcriptFeedback";
 
-const props = defineProps<{ messageId: number; text: string; partial?: boolean; notes: TranscriptNote[] }>();
+const props = defineProps<{ messageId: number; text: string; partial?: boolean; notes: TranscriptNote[]; canExplain?: boolean }>();
 const emit = defineEmits<{
   add: [quote: TranscriptQuote, body: string];
   remove: [id: string];
   followUp: [delivery: string];
   resolve: [id: string, resolved: boolean];
   quote: [text: string, ask: boolean];
+  explain: [text: string];
 }>();
 const content = useTemplateRef<HTMLElement>("content");
 const input = useTemplateRef<HTMLTextAreaElement>("input");
@@ -34,6 +35,16 @@ async function startComment() {
 function quote(ask: boolean) {
   if (!selection.value) return;
   emit("quote", selection.value.quote, ask);
+  clearSelection();
+}
+
+function explain() {
+  if (!selection.value) return;
+  emit("explain", selection.value.quote);
+  clearSelection();
+}
+
+function clearSelection() {
   selection.value = null;
   window.getSelection()?.removeAllRanges();
 }
@@ -63,6 +74,9 @@ function cancel() {
       </button>
       <button type="button" :class="actionClass" title="Quote the selection and start a question about it" @mousedown.prevent @click="quote(true)">
         <PhQuestion :size="12" /> Ask about this
+      </button>
+      <button v-if="canExplain" type="button" :class="actionClass" title="Explain the selection in a side chat, without touching this thread" @mousedown.prevent @click="explain">
+        <PhLightbulb :size="12" /> Explain
       </button>
     </div>
     <form v-if="editing" class="mt-2 grid gap-1.5 rounded border border-border bg-hover p-2" @submit.prevent="submit" @keydown.esc.stop="cancel">

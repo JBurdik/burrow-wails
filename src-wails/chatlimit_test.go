@@ -102,7 +102,7 @@ func TestUsageLimitResumesOnce(t *testing.T) {
 	if got := chatRow(t, a, c.ID).LimitResumeAt; got != reset.UnixMilli() {
 		t.Fatalf("limit_resume_at = %d", got)
 	}
-	a.ChatQueueAdd(c.ID, "queued", nil)
+	a.ChatQueueAdd(c.ID, "queued", nil, "")
 
 	s := &imgSink{}
 	a.deliverPending(now, s.send) // limit not reset yet: nothing, queue included

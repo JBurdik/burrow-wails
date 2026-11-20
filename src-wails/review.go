@@ -139,7 +139,7 @@ func (a *App) ReviewChanges(workspaceID, parentChatID int64, base string) (map[s
 	if native {
 		err = a.codexReview(c, base)
 	} else {
-		err = a.ChatSend(c.ID, reviewPrompt(base), nil)
+		err = a.ChatSend(c.ID, reviewPrompt(base), nil, "")
 	}
 	if err != nil {
 		_ = a.DeleteChat(c.ID) // a row whose process never started is unreachable
@@ -186,6 +186,6 @@ func (a *App) codexReview(c Chat, base string) error {
 		return fmt.Errorf("start review: %w", err)
 	}
 	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
-	a.emitChatLine(id, chatUserKind, reviewLabel(base))
+	a.emitUserLine(id, reviewLabel(base), nil, "")
 	return nil
 }

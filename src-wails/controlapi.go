@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,9 +22,8 @@ import (
 // `burrow` CLI and burrow-mcp talk to.
 //
 // Auth: the loopback listener is reachable by every process on this machine, and
-// `spawn` starts programs — so it takes the same bearer token treatment as the
-// tailnet server. The token lives in <app-data>/control.token (0600); the CLI
-// reads it from there, exactly as it already reads hook.port.
+// `spawn` starts programs — so every call proves it holds <app-data>/control.token
+// (0600) or a caller key derived from it, by challenge-response (controlauth.go).
 
 // uiActionTimeout bounds a verb waiting on the frontend. Long enough for a tab
 // to open on a busy app, short enough that an agent blocked on a UI that never
@@ -64,6 +62,12 @@ func (execRunner) RunProgram(prog, cwd string, args []string) (string, string, i
 }
 
 type ptyWriter struct{ app *App }
+
+// ScreenText backs tab_output from the daemon's emulator (control.PTYScreen).
+// Not an App method on purpose: tab_output's verb scope already governs it.
+func (p ptyWriter) ScreenText(ptyID string, lines int) (string, error) {
+	return p.app.daemon.ScreenText(ptyID, lines)
+}
 
 // WritePty converts text to the []int byte list the daemon protocol carries.
 func (p ptyWriter) WritePty(ptyID, text string) error {
@@ -214,7 +218,11 @@ func (a *App) initControl(dataDir string) {
 		Schedules:         scheduleAdapter{a},
 		ChatMover:         chatMoverAdapter{a},
 		PTYs:              a,
+		Screen:            ptyWriter{a},
 		Secrets:           a,
+		TurnNeeds:         a,
+		Pins:              a,
+		ActivityDir:       filepath.Join(dataDir, "activity"),
 	})
 	a.controlToken = loadOrCreateToken(dataDir, "control.token")
 }
@@ -244,6 +252,7 @@ type ControlVerbArg struct {
 	Type     string `json:"type"`
 	Desc     string `json:"desc"`
 	Required bool   `json:"required"`
+	Schema   any    `json:"schema,omitempty"`
 }
 
 func (a *App) ControlVerbs() []ControlVerb {
@@ -254,7 +263,7 @@ func (a *App) ControlVerbs() []ControlVerb {
 	for _, v := range a.control.Verbs() {
 		cv := ControlVerb{Name: v.Name, Summary: v.Summary, Args: []ControlVerbArg{}}
 		for _, arg := range v.Args {
-			cv.Args = append(cv.Args, ControlVerbArg{Name: arg.Name, Type: arg.Type, Desc: arg.Desc, Required: arg.Required})
+			cv.Args = append(cv.Args, ControlVerbArg{Name: arg.Name, Type: arg.Type, Desc: arg.Desc, Required: arg.Required, Schema: arg.Schema})
 		}
 		out = append(out, cv)
 	}
@@ -280,7 +289,7 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !a.controlAuthorized(r) {
+		if who, ok := a.controlAuth(w, r); !ok || who.Kind != "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -293,7 +302,7 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !a.controlAuthorized(r) {
+		if who, ok := a.controlAuth(w, r); !ok || who.Kind != "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -304,8 +313,11 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusNoContent)
 		go coreQuit()
 	})
+	// The one unauthenticated /v1 path: a single-use nonce to sign the next call with.
+	mux.HandleFunc("/v1/_challenge", a.handleControlChallenge)
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
-		if !a.controlAuthorized(r) {
+		who, ok := a.controlAuth(w, r)
+		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -372,6 +384,18 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 		if params == nil {
 			params = control.Params{}
 		}
+		// A chat / tab key IS the caller: its hints must agree, and a limited
+		// chat may not use Burrow to get past its own permission mode.
+		problem := bindCaller(who, params)
+		if problem == "" && who.Kind == "chat" {
+			problem = a.chatCapProblem(verb, who.ID, params)
+		}
+		if problem != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": problem})
+			return
+		}
 		params["caller_is_subagent"] = a.chatIsSubagent(params.Int("parent_chat_id"))
 		if a.control == nil {
 			http.Error(w, "control surface not ready", http.StatusServiceUnavailable)
@@ -399,15 +423,6 @@ func (a *App) registerControlRoutes(mux *http.ServeMux) {
 func writeJSONFileResponse(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-func (a *App) controlAuthorized(r *http.Request) bool {
-	if a.controlToken == "" {
-		return false // token unavailable → fail closed
-	}
-	got := r.Header.Get("Authorization")
-	want := "Bearer " + a.controlToken
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 // loadOrCreateToken persists a random bearer token under the app data dir.
@@ -513,6 +528,7 @@ func (a *App) addBurrowEnvForChat(env map[string]string, cwd string, chatID int6
 	a.addBurrowEnv(env, cwd)
 	if chatID > 0 {
 		env["BURROW_CHAT_ID"] = strconv.FormatInt(chatID, 10)
+		env["BURROW_CALLER_TOKEN"] = a.callerKeyEnv("chat", chatID)
 	}
 }
 

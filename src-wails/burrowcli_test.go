@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,22 +26,21 @@ func runBurrowWithEnv(t *testing.T, env []string, args ...string) (stdout string
 	t.Helper()
 
 	got := &capturedCall{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := signedStub(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		got.Path = r.URL.Path
 		got.Auth = r.Header.Get("Authorization")
 		_ = json.Unmarshal(body, &got.Body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"pty_id":42}`))
-	}))
-	t.Cleanup(srv.Close)
+	})
 
 	port := srv.URL[strings.LastIndex(srv.URL, ":")+1:]
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "hook.port"), []byte(port+"\n"+fmt.Sprint(os.Getpid())), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, "control.token"), []byte("tok123"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "control.token"), []byte(testToken), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for i, value := range env {
@@ -54,6 +52,7 @@ func runBurrowWithEnv(t *testing.T, env []string, args ...string) (stdout string
 		"BURROW_HOME_DIR=" + home,
 		"BURROW_CWD=/tmp/repo",
 		"BURROW_HOOK_PORT=",
+		"BURROW_CALLER_TOKEN=",
 	}, env...)...)
 	out, err := cmd.CombinedOutput()
 	code = 0
@@ -78,7 +77,7 @@ func TestCLISendsPositionalAndFlagsAsJSON(t *testing.T) {
 	if call.Path != "/v1/spawn" {
 		t.Errorf("path = %q, want /v1/spawn", call.Path)
 	}
-	if call.Auth != "Bearer tok123" {
+	if !strings.HasPrefix(call.Auth, "Burrow-Proof ") || strings.Contains(call.Auth, testToken) {
 		t.Errorf("auth = %q", call.Auth)
 	}
 	if call.Body["task"] != "fix the cache bug" {
@@ -150,7 +149,7 @@ func TestCLIDerivesHomeFromSessionDirectory(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stdout)
 	}
-	if call.Path != "/v1/spawn" || call.Auth != "Bearer tok123" {
+	if call.Path != "/v1/spawn" || !strings.HasPrefix(call.Auth, "Burrow-Proof ") {
 		t.Fatalf("CLI did not use the home derived from BURROW_SESSION_DIR: %+v", call)
 	}
 }

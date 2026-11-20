@@ -4,14 +4,67 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
+
+	"burrow/internal/ctlauth"
 )
 
 // newTestServer wires a Server directly at the httptest URL, bypassing New's
 // port-based baseURL construction — the tests only care what callTool does to
 // call.Arguments before it posts.
-func newTestServer(url, chatID string) *Server {
-	return &Server{baseURL: url + "/", token: "tok", cwd: "/tmp/repo", chatID: chatID, client: http.DefaultClient}
+func newTestServer(raw, chatID string) *Server {
+	u, _ := url.Parse(raw)
+	port, _ := strconv.Atoi(u.Port())
+	return &Server{baseURL: raw + "/", port: port, token: "tok", cwd: "/tmp/repo", chatID: chatID, client: http.DefaultClient}
+}
+
+// signedServer is a core stand-in that speaks the challenge with key "tok"
+// (lie = sign its replies with the wrong key) before calling h.
+func signedServer(t *testing.T, lie bool, h http.HandlerFunc) *httptest.Server {
+	t.Setenv("BURROW_CALLER_TOKEN", "") // tests may run inside a Burrow chat
+	nonces := map[string]bool{}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/_challenge" {
+			n := ctlauth.Nonce()
+			nonces[n] = true
+			_ = json.NewEncoder(w).Encode(map[string]string{"nonce": n})
+			return
+		}
+		u, _ := url.Parse("http://" + r.Host)
+		port, _ := strconv.Atoi(u.Port())
+		sn, cn, proof, _, ok := ctlauth.Parse(r.Header.Get("Authorization"))
+		if !ok || !nonces[sn] || !ctlauth.Equal(proof, ctlauth.Proof("tok", "client", sn, cn, port)) {
+			t.Errorf("bad client proof: %q", r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		delete(nonces, sn)
+		key := "tok"
+		if lie {
+			key = "not-the-token"
+		}
+		w.Header().Set(ctlauth.ProofHeader, ctlauth.Proof(key, "server", sn, cn, port))
+		h(w, r)
+	}))
+}
+
+// The token never travels, and a reply from a core that can't prove itself
+// (something else on the port) is an error, not a result.
+func TestCallToolRefusesAnUnprovenServer(t *testing.T) {
+	ts := signedServer(t, true, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer tok" {
+			t.Error("token sent as Bearer")
+		}
+		w.Write([]byte(`{"ok":true}`))
+	})
+	defer ts.Close()
+	resp := newTestServer(ts.URL, "").callTool(callToolReq("list_tabs", map[string]any{}))
+	res, _ := resp.Result.(map[string]any)
+	if res["isError"] != true {
+		t.Fatalf("an unproven reply was trusted: %+v", resp.Result)
+	}
 }
 
 func callToolReq(name string, args map[string]any) rpcRequest {
@@ -25,10 +78,10 @@ func callToolReq(name string, args map[string]any) rpcRequest {
 // spawn/wait_result/collect_results called as tools never see a parent.
 func TestCallToolInjectsParentChatIDFromEnv(t *testing.T) {
 	var got map[string]any
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := signedServer(t, false, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		w.Write([]byte(`{"ok":true}`))
-	}))
+	})
 	defer ts.Close()
 
 	s := newTestServer(ts.URL, "42")
@@ -45,10 +98,10 @@ func TestCallToolInjectsParentChatIDFromEnv(t *testing.T) {
 // thread id out of nothing.
 func TestCallToolOmitsParentChatIDWithoutEnv(t *testing.T) {
 	var got map[string]any
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := signedServer(t, false, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		w.Write([]byte(`{"ok":true}`))
-	}))
+	})
 	defer ts.Close()
 
 	s := newTestServer(ts.URL, "")
@@ -62,10 +115,10 @@ func TestCallToolOmitsParentChatIDWithoutEnv(t *testing.T) {
 // thread) is never overwritten by the environment's.
 func TestCallToolDoesNotOverrideExplicitParentChatID(t *testing.T) {
 	var got map[string]any
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := signedServer(t, false, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		w.Write([]byte(`{"ok":true}`))
-	}))
+	})
 	defer ts.Close()
 
 	s := newTestServer(ts.URL, "42")

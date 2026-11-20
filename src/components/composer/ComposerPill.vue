@@ -15,7 +15,7 @@
     <DropdownMenuContent
       :align="align"
       :side="side"
-      class="composer-menu"
+      class="composer-menu !z-[80]"
       :class="detailed ? 'min-w-[330px]' : 'min-w-[200px]'"
     >
       <DropdownMenuItem

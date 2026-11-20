@@ -1,5 +1,10 @@
 package main
 
+import (
+	"regexp"
+	"strings"
+)
+
 // Fold: provider-neutral events → the message list a chat renders.
 //
 // This is the second half of what `src/lib/chatProjection.ts` used to do
@@ -34,6 +39,12 @@ type ChatMessage struct {
 
 	Images  []string `json:"images,omitempty"`
 	Partial bool     `json:"partial,omitempty"`
+	// ClientID: a user row's submit client id (chatsubmit.go) — dedupe after a
+	// core restart and the client's echo match.
+	ClientID string `json:"clientId,omitempty"`
+	// Auto: a user row Go sent on its own (userLine.Auto) — drawn as a wait
+	// divider, not a bubble (transcriptRows.ts).
+	Auto *autoSend `json:"auto,omitempty"`
 
 	ToolInput    map[string]any `json:"toolInput,omitempty"`
 	ToolOutput   string         `json:"toolOutput,omitempty"`
@@ -63,6 +74,41 @@ type ChatMessage struct {
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
 	Surface        string `json:"surface,omitempty"`
+
+	// Plumbing: a finished tool call that is plumbing, not work (isPlumbingCall)
+	// — clients hide the row. Set by the fold when the call completes.
+	Plumbing bool `json:"plumbing,omitempty"`
+}
+
+// contextReportMarker is in Claude's `/context` answer. The fold keeps that
+// answer out of the transcript: the composer's context card shows it, read
+// live from the chat-event text.delta (chatSession.ts requestContextReport).
+const contextReportMarker = "Estimated usage by category"
+
+// isContextReportRow: an assistant row holding a `/context` report, folded
+// before the fold dropped them. Old transcripts are not refolded, so the read
+// path marks it plumbing instead (stubRowImages) — the index stays.
+func isContextReportRow(m ChatMessage) bool {
+	return m.Role == "assistant" && strings.Contains(m.Text, contextReportMarker)
+}
+
+// plumbingTools are tool calls that are plumbing, not work (as threadbear
+// hides them): a taken end_turn — the card under the turn already says what
+// it said — the Stop gate's end_turn_pending, and ToolSearch, which only
+// loads a tool. A failed one is not plumbing: the turn carried on because of it.
+var plumbingTools = map[string]bool{"mcp__burrow__end_turn": true, "mcp__burrow__end_turn_pending": true, "ToolSearch": true}
+
+// plumbingTitle: Codex / ACP name an MCP call "<server>: <tool>".
+var plumbingTitle = regexp.MustCompile(`(?i)^burrow[:\s]+end_turn(_pending)?$`)
+
+func isPlumbingCall(m ChatMessage) bool {
+	if m.Role != "tool" || m.ToolFailed {
+		return false
+	}
+	if m.ToolRawName {
+		return plumbingTools[m.Text]
+	}
+	return plumbingTitle.MatchString(strings.TrimSpace(m.Text))
 }
 
 // foldState is the mutable accumulator threaded through folding one event
@@ -96,12 +142,34 @@ func foldEvents(events []ProviderRuntimeEvent) []ChatMessage {
 func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 	switch ev.Type {
 	case EvtTextDelta:
+		if strings.Contains(ev.Text, contextReportMarker) {
+			return false
+		}
 		return appendChunk(st, "assistant", ev, true)
 	case EvtThinkingDelta:
 		return appendChunk(st, "thinking", ev, true)
 	case EvtUserDelta:
 		// A replayed user turn is never "partial" — it finished long ago.
-		return appendChunk(st, "user", ev, false)
+		if !appendChunk(st, "user", ev, false) {
+			return false
+		}
+		if ev.ClientID != "" || len(ev.Images) > 0 || ev.Auto != nil {
+			for i := len(st.messages) - 1; i >= 0; i-- {
+				if m := &st.messages[i]; m.Role == "user" && m.AcpMsgID == ev.MessageID {
+					if ev.ClientID != "" {
+						m.ClientID = ev.ClientID
+					}
+					if ev.Auto != nil {
+						m.Auto = ev.Auto
+					}
+					if len(m.Images) == 0 {
+						m.Images = ev.Images
+					}
+					break
+				}
+			}
+		}
+		return true
 
 	case EvtMessageNote:
 		// A client-authored row (system-info marker, permission receipt).
@@ -184,6 +252,7 @@ func applyChatEvent(st *foldState, ev ProviderRuntimeEvent) bool {
 		}
 		st.messages[idx].ToolOutput = ev.Output
 		st.messages[idx].ToolFailed = ev.Failed
+		st.messages[idx].Plumbing = isPlumbingCall(st.messages[idx])
 		if ev.UUID != "" {
 			st.messages[idx].UUID = ev.UUID
 		}

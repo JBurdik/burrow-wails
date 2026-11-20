@@ -27,9 +27,14 @@ import (
 // ACP (acp.go). Each starts from the row the same way whoever asked.
 
 type chatRuntime struct {
-	locks  sync.Map // chat id string → *sync.Mutex
-	active sync.Map // chat id string → time.Time of last activity (chatsleep.go)
-	moved  sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
+	locks   sync.Map // chat id string → *sync.Mutex
+	active  sync.Map // chat id string → time.Time of last activity (chatsleep.go)
+	moved   sync.Map // chat id string → struct{}: live process runs in the old cwd (chatmove.go)
+	auto    sync.Map // chat id string → *autoSend of the Go-initiated send in progress (chatSendSettled)
+	sending sync.Map // chat id string → client id of the send in progress (chatsubmit.go)
+	// chat id string → struct{}: chatSendBody already recorded the prompt, so
+	// the transport must not record it again (recordSentUserLine).
+	recorded sync.Map
 
 	ctrlSeq     atomic.Int64
 	ctrlMu      sync.Mutex
@@ -154,21 +159,82 @@ func (a *App) ensureRPC(c Chat, transport string) error {
 
 // ChatSend is the one door for a prompt, whatever the transport: it starts the
 // process if there is none (resuming the row's session — also what makes a
-// send after auto-sleep work, chatsleep.go) and then sends.
-func (a *App) ChatSend(chatID int64, text string, images []string) error {
+// send after auto-sleep work, chatsleep.go) and then sends. A non-empty
+// clientID already accepted for this chat returns nil without sending again
+// (chatclientid.go) — a client's retry after a dropped socket.
+func (a *App) ChatSend(chatID int64, text string, images []string, clientID string) error {
 	c, err := a.chatByID(chatID)
 	if err != nil {
 		return err
 	}
+	_, finish, dup := a.claimClientID(chatID, clientID)
+	if dup {
+		return nil
+	}
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
-	return a.chatSendLocked(c, id, text, images)
+	err = a.chatSendLocked(c, id, text, images, clientID)
+	finish(err == nil, nil)
+	return err
+}
+
+// ChatWarm starts a fresh thread's process ahead of its first prompt, so the
+// CLI's own startup (MCP servers, hooks: seconds) overlaps the user typing
+// instead of following the send. Never sends; a live process is a no-op. An
+// unused warm process is stopped by auto-sleep like any idle one (chatsleep.go).
+func (a *App) ChatWarm(chatID int64) error {
+	c, err := a.chatByID(chatID)
+	if err != nil {
+		return err
+	}
+	if c.ArchivedAt != 0 {
+		return nil
+	}
+	id := strconv.FormatInt(chatID, 10)
+	defer a.chatRT.lock(id)()
+	a.chatRT.touchChat(id, time.Now())
+	if t := chatTransport(c); t != "claude-cli" {
+		return a.ensureRPC(c, t)
+	}
+	return a.ensureClaude(c)
 }
 
 // chatSendLocked is ChatSend's body; the caller holds the chat lock.
-func (a *App) chatSendLocked(c Chat, id, text string, images []string) error {
+// clientID rides to the recorded user line (chatsubmit.go).
+func (a *App) chatSendLocked(c Chat, id, text string, images []string, clientID string) error {
+	return a.withSendingClientID(id, clientID, func() error { return a.chatSendBody(c, id, text, images) })
+}
+
+func (a *App) chatSendBody(c Chat, id, text string, images []string) error {
 	chatID := c.ID
 	a.chatRT.touchChat(id, time.Now())
+	// Before the recorded line exists: it is what makes the next send not the first.
+	first := c.ParentChatID == 0 && c.Kind != "side" && a.firstUserSend(chatID)
+	if first {
+		a.autoTitleChat(c, text)
+	}
+	// The prompt is recorded BEFORE the process starts (threadbear's startTurn),
+	// so every client shows it and a running phase at once instead of after the
+	// CLI's startup (seconds: MCP servers, hooks). A failed start or write ends
+	// the turn with a turn.failed marker, so no caller waits on a turn nothing
+	// will answer — the reason the transports used to record only after a write.
+	// A moved chat restarts only while settled — decide before the phase says running.
+	a.restartIfMoved(id)
+	a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
+	a.emitUserLine(id, text, images, a.sendingClientID(id))
+	a.chatRT.recorded.Store(id, struct{}{})
+	defer a.chatRT.recorded.Delete(id)
+	err := a.chatStartAndSend(c, id, text, images, first)
+	if err != nil {
+		if b, mErr := json.Marshal(acpTurnEnd(err.Error())); mErr == nil {
+			a.emitChatLine(id, "acp-data", string(b))
+		}
+	}
+	return err
+}
+
+func (a *App) chatStartAndSend(c Chat, id, text string, images []string, first bool) error {
+	chatID := c.ID
 	if t := chatTransport(c); t != "claude-cli" {
 		if err := a.ensureRPC(c, t); err != nil {
 			return fmt.Errorf("start %s: %w", t, err)
@@ -181,7 +247,24 @@ func (a *App) chatSendLocked(c Chat, id, text string, images []string) error {
 		return fmt.Errorf("start claude: %w", err)
 	}
 	a.markChatAwake(chatID)
-	return a.ClaudeSend(id, text, c.ClaudeSessionID, images)
+	// A new thread's first prompt: point its agent at open threads that look
+	// like the same work (chatsamework.go). Threads only — a sub-agent or a
+	// side chat was started on purpose.
+	var hits []sameWorkHit
+	if first {
+		hits = a.findSameWork(chatID, text)
+	}
+	hidden := ""
+	if len(hits) > 0 {
+		hidden = sameWorkContext(hits)
+	}
+	if err := a.claudeSend(id, text, c.ClaudeSessionID, images, hidden); err != nil {
+		return err
+	}
+	if len(hits) > 0 {
+		a.publishSurfaceNote(chatID, "", sameWorkNote(hits))
+	}
+	return nil
 }
 
 // stopProcess stops whichever runtime holds the chat id. By id, not by the
@@ -280,13 +363,21 @@ func (a *App) ChatClear(chatID int64) error {
 	id := strconv.FormatInt(chatID, 10)
 	defer a.chatRT.lock(id)()
 	a.stopProcess(id)
-	if err := a.DeleteChatMessages(int(chatID)); err != nil {
+	// A cut to nothing, not a delete: the stream ord (= the splice revision
+	// clients hold) keeps counting, and clients get an authoritative splice.
+	if _, err := a.db.Exec(`DELETE FROM openai_sessions WHERE chat_id = ?`, chatID); err != nil {
 		return err
 	}
+	if err := a.truncateChatTranscript(id, []ChatMessage{}); err != nil {
+		return err
+	}
+	a.deleteChatImages(int(chatID))
 	if _, err := a.db.Exec(`UPDATE chats SET claude_session_id = '', resume_at = '', message_count = 0 WHERE id = ?`, chatID); err != nil {
 		return err
 	}
+	a.dropActionPresses(chatID, 0)
 	a.emitChatLine(id, chatRuntimeKind, "clear")
+	a.emitAuthoritativeSplice(id, 0)
 	busEmit("chats-changed", nil)
 	return nil
 }

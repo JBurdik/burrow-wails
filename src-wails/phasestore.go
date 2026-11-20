@@ -45,6 +45,18 @@ type PhaseStore struct {
 	onChange func(id string, prev, next agentphase.Phase)
 }
 
+// prunePhaseRows (startup, before NewPhaseStore loads the table) drops rows no
+// client can show: a deleted chat's phase (DeleteChat now forgets them; older
+// builds left ~450 behind) and ids from before the pty:/chat: prefix. Dead
+// PTYs are the phase poll's (prunablePtyPhase): only the daemon knows them.
+func prunePhaseRows(db *sql.DB) {
+	if _, err := db.Exec(`DELETE FROM pty_phase
+		WHERE (id LIKE 'chat:%' AND CAST(substr(id, 6) AS INTEGER) NOT IN (SELECT id FROM chats))
+		   OR (id NOT LIKE 'chat:%' AND id NOT LIKE 'pty:%')`); err != nil {
+		log.Printf("prune phases: %v", err)
+	}
+}
+
 func NewPhaseStore(db *sql.DB) (*PhaseStore, error) {
 	s := &PhaseStore{db: db, phases: make(map[string]agentphase.Phase), seq: make(map[string]uint64)}
 	rows, err := db.Query(`SELECT id, state, detail, model, title, is_agent, turn_ended_at, updated_at, seq FROM pty_phase`)

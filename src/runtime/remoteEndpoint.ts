@@ -18,6 +18,7 @@
  * xterm (src/runtime/boundary.test.ts enforces it).
  */
 import type { EndpointSource } from "./transport";
+import { cacheClear } from "./remoteCache";
 
 export interface RemoteCredentials {
   /** Origin plus any path prefix, e.g. https://mac-mini.tailnet.ts.net/burrow */
@@ -126,6 +127,7 @@ export function renameEnvironment(id: string, name: string): void {
 
 /** Forgets one machine's credentials; clears the active pointer if it was it. */
 export function removeEnvironment(id: string): void {
+  cacheClear(id);
   writeEnvironments(listEnvironments().filter((e) => e.environment_id !== id));
   if (localStorage.getItem(ACTIVE_KEY) === id) setActiveEnvironment(null);
 }

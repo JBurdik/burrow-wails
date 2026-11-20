@@ -55,6 +55,7 @@
               <span class="absolute inset-0 hidden items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground group-hover:flex" role="button" :aria-label="`Close ${tab.label}`" @click.stop="closeSurface(tab.id)"><PhX :size="12" /></span>
             </span>
             <span class="font-medium">{{ tab.label }}</span>
+            <span v-if="tab.id === 'highlights' && newPins" class="size-1.5 shrink-0 rounded-full bg-[var(--blue)]" title="New pins" />
             <span v-if="surfaceCount(tab.id)" class="tabular-nums text-muted-foreground">{{ surfaceCount(tab.id) }}</span>
             <!-- Move to the other pane — the visible door to the split (drag and right-click do the same). -->
             <span
@@ -65,7 +66,7 @@
               @click.stop="moveSurface(tab.id, pi === 0 ? 1 : 0)"
             ><component :is="pi === 0 ? PhArrowDown : PhArrowUp" :size="11" /></span>
           </button>
-          <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><PhPlus :size="15" /></button>
+          <button class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Open a surface" aria-label="Open a surface" @click="layout.panes[pi].active = null"><span class="relative flex"><PhPlus :size="15" /><span v-if="pi === 0 && newPins && !highlightsInTabs" class="absolute -right-1 -top-1 size-1.5 rounded-full bg-[var(--blue)]" title="This thread pinned something — open Highlights" /></span></button>
         </div>
         <button v-if="pi === 0 && !layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" title="Split the panel" aria-label="Split the panel" @click="openBottom(layout)"><PhRows :size="14" /></button>
         <button v-if="layout.bottomOpen" class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-nav)] text-muted-foreground hover:bg-hover hover:text-foreground" :title="layout.maximized === pi ? 'Restore' : 'Maximize'" :aria-label="layout.maximized === pi ? 'Restore pane' : 'Maximize pane'" @click="toggleMaximize(layout, pi)"><component :is="layout.maximized === pi ? PhArrowsInSimple : PhArrowsOutSimple" :size="13" /></button>
@@ -368,6 +369,16 @@
 
     <ProgressSurface v-else-if="act(pi) === 'progress'" :chat-id="activeChatId" />
 
+    <HighlightsSurface
+      v-else-if="act(pi) === 'highlights'"
+      :chat-id="activeChatId"
+      :cwd="props.cwd"
+      @open-file="openFile"
+      @open-url="openHighlightUrl"
+      @open-surface="(id) => props.workspaceId && openPanelSurface(id, props.workspaceId)"
+      @open-subagent="openSubagentChat"
+    />
+
     <SideChatSurface v-else-if="act(pi) === 'side-chat'" :chat-id="activeChatId" :cwd="props.cwd" />
 
     <MarkdownDocSurface v-else-if="act(pi) === 'doc' && docPath" :path="docPath" :cwd="props.cwd" />
@@ -380,7 +391,29 @@
       @edit="mdEditing[act(pi)!] = true"
     />
 
+    <HtmlFileSurface
+      v-else-if="act(pi)?.startsWith(FILE_PREFIX) && isHtmlFile(act(pi)!) && !htmlSource[act(pi)!]"
+      :path="act(pi)!.slice(FILE_PREFIX.length)"
+      :cwd="props.cwd"
+      @source="htmlSource[act(pi)!] = true"
+    />
+
+    <ImageFileSurface
+      v-else-if="act(pi)?.startsWith(FILE_PREFIX) && isImageFile(act(pi)!)"
+      :path="act(pi)!.slice(FILE_PREFIX.length)"
+      :cwd="props.cwd"
+    />
+
     <div v-else-if="act(pi)?.startsWith(FILE_PREFIX)" class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <button
+        v-if="isHtmlFile(act(pi)!)"
+        class="absolute right-3 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-[var(--radius-nav)] bg-panel text-muted-foreground hover:bg-hover hover:text-foreground"
+        title="Preview"
+        aria-label="Preview"
+        @click="htmlSource[act(pi)!] = false"
+      >
+        <PhEye :size="13" />
+      </button>
       <button
         v-if="isMarkdown(act(pi)!)"
         class="absolute right-3 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-[var(--radius-nav)] bg-panel text-muted-foreground hover:bg-hover hover:text-foreground"
@@ -697,6 +730,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, inject, provide, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   PhFiles, PhGitBranch, PhGitCommit,
   PhArrowClockwise, PhWarning, PhX, PhArrowUpRight,
@@ -734,6 +768,9 @@ import DevServersSurface from "./DevServersSurface.vue";
 import BackgroundTasksSurface from "./BackgroundTasksSurface.vue";
 import { PhTerminalWindow } from "@phosphor-icons/vue";
 import ProgressSurface from "./ProgressSurface.vue";
+import HighlightsSurface from "./HighlightsSurface.vue";
+import HtmlFileSurface from "./HtmlFileSurface.vue";
+import ImageFileSurface from "./ImageFileSurface.vue";
 import SideChatSurface from "./SideChatSurface.vue";
 import { PhChatsCircle } from "@phosphor-icons/vue";
 import MarkdownDocSurface from "./MarkdownDocSurface.vue";
@@ -752,6 +789,7 @@ import WorkspacePulseSurface from "./WorkspacePulseSurface.vue";
 import ExtensionNativeSurface from "./ExtensionNativeSurface.vue";
 import { initPtyCounter, nextPtyId } from "@/lib/ptyId";
 import { useExtensionSurfaces } from "@/composables/useExtensionSurfaces";
+import { termInputState } from "@/lib/termRegistry";
 import { addTerm, findServed, installPanelTerminals, keepLive, loadTerms, onlyShell, removeTerm, saveTerms, type RpTerm, type RpTerms, type ServeRequest, type ServeResult } from "@/lib/rpTerminals";
 
 const props = withDefaults(defineProps<{
@@ -789,7 +827,11 @@ function storedDoc(id: number): string {
 const docPath = computed(() => wsUi(wsKey.value).docPath);
 // Files opened from the explorer: one surface per file, id `file:<path>`.
 const FILE_PREFIX = "file:";
+// .html files open drawn (HtmlFileSurface); Source flips a tab to the editor.
+const htmlSource = reactive<Record<string, boolean>>({});
+const isHtmlFile = (id: string) => /\.html?$/i.test(id);
 const FILES_KEY = "burrow.rpFiles";
+const isImageFile = (id: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(id);
 const isMarkdown = (id: string) => /\.(md|markdown|mdx)$/i.test(id);
 /** Markdown file tabs open rendered; true = switched to the editor. Per surface id, not persisted. */
 const mdEditing = reactive<Record<string, boolean>>({});
@@ -970,6 +1012,12 @@ function openBrowserUrl(url: string, workspaceId: number) {
   ensureBrowserPane(workspaceId);
   browserNav[workspaceId] = { url, n: (browserNav[workspaceId]?.n ?? 0) + 1 };
 }
+/** A Highlights link: a local dev server previews in the Browser surface,
+ *  anything else opens in the system browser. */
+function openHighlightUrl(url: string) {
+  if (props.workspaceId && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/.test(url)) openBrowserUrl(url, props.workspaceId);
+  else void import("@/lib/wailsCompat/shell").then((m) => m.open(url));
+}
 /** A chat link to one of this repo's pull requests: the PRs surface, on its detail. */
 const prOpen = reactive<Record<number, { number: number; url: string; n: number }>>({});
 function openPullRequest(number: number, url: string, workspaceId: number) {
@@ -981,14 +1029,13 @@ const activeChatAgentName = computed(() => {
   return chat ? providers.resolve(chat.agentKind)?.name : undefined;
 });
 /** The Browser surface's "Nothing listening" button: ask the chat on screen,
- *  through the same doors as its composer — queued behind a running turn, else sent. */
+ *  through the composer's door (chat_submit: Go queues it behind a running turn, else sends). */
 function askToStartServer(port: number) {
   const id = activeChatId.value;
   if (!id) return;
   const text = `Start the dev server on port ${port} so I can preview it at http://localhost:${port}.`;
   const session = chatSession(id);
-  if (session.busy.value) void session.enqueueMessage(text);
-  else void session.send({ text });
+  void session.submit({ text });
 }
 /** Open a surface (Background, Progress, Outputs, …) in a workspace's panel
  *  from outside it — a transcript row that names one. The caller shows the panel. */
@@ -1168,6 +1215,7 @@ const tabs = computed(() => {
     { id: "pull-requests", label: "PRs", icon: PhGitBranch, description: "Check pull requests for this workspace." },
     { id: "explorer", label: "Files", icon: PhFiles, description: "Browse the current workspace." },
     { id: "diff", label: "Diff", icon: PhGitCommit, description: "Review changes by turn, branch or worktree; restore a checkpoint." },
+    { id: "highlights", label: "Highlights", icon: PhSparkle, description: "What the active chat made, pinned and asks of you, in one place." },
     { id: "agents", label: "Agents", icon: PhRobot, description: "Sub-agents spawned by this chat." },
     { id: "progress", label: "Progress", icon: PhListChecks, description: "The active chat's live todo list." },
     { id: "side-chat", label: "Side chat", icon: PhChatsCircle, description: "Ask a quick question about the active chat without disturbing it." },
@@ -1339,7 +1387,7 @@ function closePanelTerminal(ptyId: number): boolean {
 // it forwards it here (rpWindow.ts).
 let panelOpsOff: (() => void) | null = null;
 onMounted(() => {
-  installPanelTerminals({ serve, close: closePanelTerminal });
+  installPanelTerminals({ serve, close: closePanelTerminal, typeInto: typeIntoTerminal });
   if (inWindow) panelOpsOff = answerPanelOps();
 });
 onBeforeUnmount(() => {
@@ -1437,6 +1485,97 @@ async function toggleTerminal() {
     visible?.focus();
   });
 }
+
+// A chat's ▶ Run in terminal: the command lands at the prompt, the user presses
+// Return. Bracketed paste so a multi-line command waits too; only into a shell
+// that is at rest (a running program would read it as input).
+const lastTyped = new Map<number, string>();
+async function typeIntoTerminal(text: string): Promise<boolean> {
+  const l = layout.value;
+  if (!(props.open && isShown(l, "terminal"))) await openSurface("terminal", paneOf(l, "terminal") === 0 ? 0 : 1);
+  await termsRestored;
+  const s = termsByWs[wsKey.value];
+  const id = s?.active ?? s?.terms[0]?.id;
+  if (!id) return false;
+  // A terminal opened just now has no shell for a beat: give it a second.
+  let atRest = false;
+  for (let i = 0; i < 10 && !atRest; i++) {
+    atRest = onlyShell(await invoke<string>("get_pty_foreground", { id }).catch(() => "?"));
+    if (!atRest) await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!atRest) return false;
+  // Type only into a line editor that asked for bracketed paste: without it
+  // (sh, dash, macOS's bash 3.2, a `read`) each newline in a pasted block
+  // runs the line before it, unasked. Threadbear's rule; else the caller copies.
+  const input = termInputState(id);
+  if (!input?.bracketed) return false;
+  // A command typed earlier still waiting at the prompt: appending another
+  // would make a third one nobody wrote.
+  const pending = lastTyped.get(id);
+  if (pending && input.line.includes(pending)) return false;
+  const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+  await invoke("write_pty", { id, data: Array.from(new TextEncoder().encode("\x1b[200~" + clean + "\x1b[201~")) });
+  lastTyped.set(id, clean.split("\n")[0].trim().slice(0, 60));
+  await nextTick();
+  requestAnimationFrame(() => {
+    const host = hostSlot(wsKey.value, "terminal");
+    [...(host?.querySelectorAll<HTMLTextAreaElement>(".xterm-helper-textarea") ?? [])].find((t) => t.offsetParent !== null)?.focus();
+  });
+  return true;
+}
+
+// (Here, after layout / activeChatId exist: the watch reads both at once.)
+// New pins → a dot on the Highlights tab (or on "+" when it isn't open), until
+// Highlights is on screen. Per thread: the count it has, the count seen.
+const pinCount = ref(0);
+const PINS_SEEN_KEY = "burrow.highlights.seenPins";
+const seenPins = reactive<Record<number, number>>(JSON.parse(localStorage.getItem(PINS_SEEN_KEY) || "{}"));
+async function loadPinCount() {
+  const id = activeChatId.value;
+  if (!id) { pinCount.value = 0; return; }
+  const list = await invoke<unknown[]>("chat_pins_list", { chatId: id }).catch(() => []);
+  if (id === activeChatId.value) pinCount.value = list?.length ?? 0;
+}
+watch(activeChatId, () => void loadPinCount(), { immediate: true });
+let offPins: (() => void) | undefined;
+void listen<{ chat_id: number }>("chat-pins-changed", (e) => { if (e.payload?.chat_id === activeChatId.value) void loadPinCount(); }).then((u) => (offPins = u));
+onBeforeUnmount(() => offPins?.());
+const highlightsInTabs = computed(() => layout.value.panes.some((p) => p.tabs.includes("highlights")));
+const highlightsOnScreen = computed(() => props.open && isShown(layout.value, "highlights"));
+watch([pinCount, highlightsOnScreen, activeChatId], () => {
+  const id = activeChatId.value;
+  if (!id) return;
+  // Seen once Highlights shows; an unpin lowers the mark so the next pin shows again.
+  if (highlightsOnScreen.value || pinCount.value < (seenPins[id] ?? 0)) {
+    seenPins[id] = pinCount.value;
+    localStorage.setItem(PINS_SEEN_KEY, JSON.stringify(seenPins));
+  }
+});
+const newPins = computed(() => !!activeChatId.value && pinCount.value > (seenPins[activeChatId.value] ?? 0) && !highlightsOnScreen.value);
+
+// pin --show: open the pinned thing now when its thread is on screen, else
+// when that thread is next opened (threadbear's requestPanel).
+// ponytail: the pending one lives in memory; a restart drops it (the pin stays).
+const pendingShow = new Map<number, string>();
+function showPinned(target: string) {
+  if (!props.open) emit("openPanel");
+  if (/^https?:\/\//.test(target)) openHighlightUrl(target);
+  else openFile(target);
+}
+let offPinShow: (() => void) | undefined;
+void listen<{ chat_id: number; target: string }>("chat-pin-show", (e) => {
+  const p = e.payload;
+  if (!p?.target) return;
+  if (p.chat_id === activeChatId.value) showPinned(p.target);
+  else pendingShow.set(p.chat_id, p.target);
+}).then((u) => (offPinShow = u));
+onBeforeUnmount(() => offPinShow?.());
+watch(activeChatId, (id) => {
+  const target = id ? pendingShow.get(id) : undefined;
+  if (!id || !target) return;
+  pendingShow.delete(id);
+  showPinned(target);
+});
 
 defineExpose({ openGitTab, openSubagent, openPanelSurface, openBrowserUrl, openPullRequest, openDoc, openFile, toggleTerminal });
 

@@ -1,6 +1,7 @@
 import { computed, effectScope, onScopeDispose, ref, watch, type EffectScope } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { appTransport, cachedRead } from "@/lib/wailsCompat/core";
 import { displayStatus, type Phase } from "@/runtime/displayStatus";
 import type { ShellSnapshotData } from "@/runtime/shellSnapshot";
 import type { TermStatus } from "@/lib/terminalStatus";
@@ -28,6 +29,8 @@ export interface FeedRow {
   route: string;
   at: number;
   recap?: string;
+  /** Go's `needs_you`: the last end_turn asked the user something. */
+  asksYou?: boolean;
   /** The project's logo (a worktree shows its repo's). */
   icon?: string;
 }
@@ -47,14 +50,18 @@ export interface FeedGroup {
 
 export const needsYou = (st: TermStatus) => st === "permission" || st === "waiting" || st === "error";
 export const unread = (st: TermStatus) => st === "review" || st === "done";
+/** A row needs you: a blocked phase, or a settled turn whose end_turn asked
+ *  (Go's needs_you) — the Sidebar's and iOS `needsYou` rule. Running stays Working. */
+export const rowNeedsYou = (r: FeedRow) => needsYou(r.status) || (r.status !== "running" && !!r.asksYou);
 
 /** Needs you → Working → Unread → Recent (idle, at most `recentCap`). Rows keep their order. */
 export function feedGroups(rows: FeedRow[], recentCap = Infinity): FeedGroup[] {
+  const rest = rows.filter((r) => !rowNeedsYou(r));
   return [
-    { key: "needs", label: "Needs you", rows: rows.filter((r) => needsYou(r.status)) },
-    { key: "working", label: "Working", rows: rows.filter((r) => r.status === "running") },
-    { key: "unread", label: "Unread", rows: rows.filter((r) => unread(r.status)) },
-    { key: "recent", label: "Recent", rows: rows.filter((r) => r.status === "idle").slice(0, recentCap) },
+    { key: "needs", label: "Needs you", rows: rows.filter(rowNeedsYou) },
+    { key: "working", label: "Working", rows: rest.filter((r) => r.status === "running") },
+    { key: "unread", label: "Unread", rows: rest.filter((r) => unread(r.status)) },
+    { key: "recent", label: "Recent", rows: rest.filter((r) => r.status === "idle").slice(0, recentCap) },
   ];
 }
 
@@ -79,7 +86,7 @@ export function feedRows(
       key: `chat:${c.id}`, kind: "chat", id: c.id, workspaceId: c.workspaceId, repoId: repoOf(c.workspaceId),
       title: c.title || `Chat ${c.id}`, workspace: byId.get(c.workspaceId)?.name ?? "",
       detail: status === "permission" || status === "waiting" ? (phase?.detail ?? "") : "",
-      status, route: `/ws/${c.workspaceId}?chat=${c.id}`, recap: c.recap, icon: icons[repoOf(c.workspaceId)],
+      status, route: `/ws/${c.workspaceId}?chat=${c.id}`, recap: c.recap, asksYou: c.needsYou, icon: icons[repoOf(c.workspaceId)],
       at: Math.max(c.lastActivityAt ?? 0, phase?.updated_at ?? 0),
     });
   }
@@ -113,16 +120,27 @@ function seenAt(): Record<string, number> {
   }
 }
 
+// The feed is torn down when its last reader unmounts (the phone's Threads
+// screen leaves the DOM while a chat is open). Keeping the last picture here
+// lets coming back paint at once instead of empty until shell_snapshot answers.
+let lastSnap: ShellSnapshotData | null = null;
+let lastPerms: PtyPermRequest[] = [];
+
 function createFeed() {
   const chats = useClaudeChatsStore();
   const workspaces = useWorkspaceStore();
-  const snap = ref<ShellSnapshotData | null>(null);
-  const perms = ref<PtyPermRequest[]>([]);
+  // First paint from the last snapshot this paired device saw (never noteSeq'd:
+  // it is only a picture until load() replaces it).
+  const snap = ref<ShellSnapshotData | null>(lastSnap ?? cachedRead<ShellSnapshotData>("shell_snapshot"));
+  const perms = ref<PtyPermRequest[]>(lastPerms);
+  watch(snap, (v) => { if (v) lastSnap = v; });
+  watch(perms, (v) => { lastPerms = v; });
   const now = ref(Date.now());
 
-  // One shell_snapshot for the first paint, then the phase events of exactly
-  // the chats and agent tabs listed, plus pty-permissions. A slow re-read only
-  // catches what has no event of its own (a tab opened, a workspace renamed).
+  // One shell_snapshot for the first paint, then events: the phases of exactly
+  // the chats and agent tabs listed, pty-permissions, terminal-tabs-changed
+  // (one workspace's tabs), workspaces-changed. A re-read only on resync,
+  // focus / visibility and a rare safety tick (it used to be every 15 s).
   async function load() {
     if (document.visibilityState === "hidden") return;
     now.value = Date.now();
@@ -177,7 +195,23 @@ function createFeed() {
   const permsOff = listen("pty-permissions", () => {
     void invoke<PtyPermRequest[]>("list_pty_permissions").then((p) => { perms.value = p ?? []; }).catch(() => {});
   });
-  const resync = window.setInterval(load, 15_000);
+  const tabsOff = listen<{ workspaceId: number }>("terminal-tabs-changed", (e) => {
+    const wsId = e.payload?.workspaceId;
+    if (!wsId) return;
+    void invoke<ShellSnapshotData["tabs"][number]>("list_terminal_tabs", { workspaceId: wsId }).then((tabs) => {
+      if (snap.value) snap.value = { ...snap.value, tabs: { ...snap.value.tabs, [wsId]: tabs ?? [] } };
+    }).catch(() => {});
+  });
+  const wsOff = listen("workspaces-changed", () => void load());
+  let offResync = () => {};
+  try {
+    offResync = appTransport().onResync(() => void load());
+  } catch {
+    // no backend (tests, browser-only dev)
+  }
+  // ponytail: safety net for anything without an event; also moves `now` for
+  // the 3-day settle flip. Drop when nothing is found missing.
+  const resync = window.setInterval(load, 5 * 60_000);
   window.addEventListener("focus", load);
   window.addEventListener("storage", tick);
   const offSeen = onSeenChanged(tick);
@@ -190,6 +224,9 @@ function createFeed() {
     offSeen();
     document.removeEventListener("visibilitychange", load);
     void permsOff.then((f) => f());
+    void tabsOff.then((f) => f());
+    void wsOff.then((f) => f());
+    offResync();
     for (const off of phaseListeners.values()) void off.then((f) => f());
   });
 

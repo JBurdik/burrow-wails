@@ -4,8 +4,17 @@
   <div v-else class="window-app flex h-full flex-col bg-[var(--terminal-bg)]">
     <!-- Hidden-inset titlebar: the traffic lights sit over this strip, which is
          also what drags the window. -->
-    <div v-if="kind !== 'settings'" class="window-titlebar flex h-[30px] shrink-0 items-center justify-center text-[12px] text-muted-foreground" style="--wails-draggable: drag">
+    <div v-if="kind !== 'settings'" class="window-titlebar relative flex h-[30px] shrink-0 items-center justify-center text-[12px] text-muted-foreground" style="--wails-draggable: drag">
       {{ title }}
+      <!-- Mini chat (src/lib/miniChat.ts): keep on top + start a fresh chat. -->
+      <div v-if="mini" class="absolute right-2 flex gap-0.5" style="--wails-draggable: no-drag">
+        <button type="button" class="rounded p-1 hover:bg-hover hover:text-foreground" :class="onTop && 'text-foreground'" :title="onTop ? 'Keep on top: on' : 'Keep on top'" @click="setOnTop(!onTop)">
+          <PhPushPin :size="13" :weight="onTop ? 'fill' : 'regular'" />
+        </button>
+        <button type="button" class="rounded p-1 hover:bg-hover hover:text-foreground" title="New mini chat" @click="newMiniChat">
+          <PhPlus :size="13" />
+        </button>
+      </div>
     </div>
     <div class="relative min-h-0 flex-1">
       <Settings v-if="kind === 'settings'" windowed @close="closeSelf" />
@@ -23,6 +32,17 @@
         @open-panel="() => {}"
       />
       <GitWindow v-else-if="kind === 'git' && ready" :initial-ws-id="wsId || undefined" class="absolute inset-0" />
+      <!-- ```options compare view (src/lib/optionsBlock.ts). -->
+      <OptionsCompare
+        v-else-if="kind === 'options' && optionsSpec && chatId != null"
+        class="absolute inset-0"
+        :spec="optionsSpec"
+        :cwd="cwd"
+        :start="Number(params.get('start') ?? 0)"
+        :answered="params.get('answered') === '1'"
+        @send="sendOptions"
+        @close="closeSelf"
+      />
       <AgentChat
         v-else-if="kind === 'chat' && chatId != null && ready"
         :chat-id="chatId"
@@ -42,6 +62,11 @@ import { hideSplash } from "@/lib/splash";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { readFollow, RP_FOLLOW_KEY, type RpFollow } from "@/lib/rpWindow";
+import { PhPlus, PhPushPin } from "@phosphor-icons/vue";
+import { miniChat } from "@/lib/miniChat";
+import { invoke } from "@tauri-apps/api/core";
+import { parseOptions } from "@/lib/optionsBlock";
+import { newClientId } from "@/lib/offline";
 
 // A secondary window: "#/window/<kind>/<id>?<params>" (src/lib/windows.ts).
 const Settings = defineAsyncComponent(() => import("@/components/Settings.vue"));
@@ -51,6 +76,7 @@ const GitWindow = defineAsyncComponent(() => import("@/components/git/GitWindow.
 const RightPanel = defineAsyncComponent(() => import("@/components/RightPanel.vue"));
 const TrayPanel = defineAsyncComponent(() => import("@/components/TrayPanel.vue"));
 const TrayToast = defineAsyncComponent(() => import("@/components/TrayToast.vue"));
+const OptionsCompare = defineAsyncComponent(() => import("@/components/OptionsCompare.vue"));
 
 const [path, query = ""] = location.hash.slice(1).split("?");
 const parts = path.split("/").filter(Boolean); // ["window", kind, id?]
@@ -60,7 +86,7 @@ const params = new URLSearchParams(query);
 const wsId = Number(params.get("ws") ?? 0);
 const chatId = params.has("chat") ? Number(params.get("chat")) : null;
 const cwd = params.get("cwd") ?? "";
-const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : kind === "rightpanel" ? "Right panel" : (params.get("title") ?? "Burrow");
+const title = kind === "settings" ? "Settings" : kind === "git" ? "Git" : kind === "rightpanel" ? "Right panel" : (params.get("title") ?? (kind === "options" ? "Compare options" : "Burrow"));
 
 // kind "rightpanel": what the main window has active, kept current by its writes.
 const follow = ref<RpFollow>(readFollow());
@@ -70,6 +96,33 @@ function onStorage(e: StorageEvent) {
 if (kind === "rightpanel") window.addEventListener("storage", onStorage);
 onBeforeUnmount(() => window.removeEventListener("storage", onStorage));
 const ready = ref(false);
+
+// kind "options": the spec rides in the route; Send = the thread's submit door
+// (queued by Go while a turn runs), then the window closes.
+const optionsSpec = kind === "options" ? parseOptions(params.get("spec") ?? "") : null;
+async function sendOptions(text: string) {
+  try {
+    await invoke("chat_submit", { chatId, text, images: [], clientId: newClientId() });
+    closeSelf();
+  } catch (e) {
+    alert(`Could not send: ${e}`);
+  }
+}
+
+// Mini chat window: pin state is per device, re-applied on every open.
+const mini = params.get("mini") === "1";
+const ON_TOP_KEY = "burrow.miniChatOnTop";
+const onTop = ref(mini && localStorage.getItem(ON_TOP_KEY) === "1");
+function setOnTop(on: boolean) {
+  onTop.value = on;
+  localStorage.setItem(ON_TOP_KEY, on ? "1" : "0");
+  void Window.SetAlwaysOnTop(on);
+}
+async function newMiniChat() {
+  const m = await miniChat(true);
+  location.hash = "#" + m.route;
+  location.reload(); // ponytail: the window reads its route once at load
+}
 
 const ui = useUIStore();
 if (kind === "settings") {
@@ -93,6 +146,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
   document.title = title;
+  if (onTop.value) void Window.SetAlwaysOnTop(true);
   await useWorkspaceStore().load().catch(() => {});
   ready.value = true;
   hideSplash();

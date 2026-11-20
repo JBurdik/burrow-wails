@@ -32,6 +32,10 @@ func scanWorkspace(row interface {
 	var isGit int
 	err := row.Scan(&w.ID, &w.Name, &w.Path, &w.CreatedAt, &w.LastOpened, &w.ParentID, &w.WorktreeBranch, &isGit, &w.Icon, &w.SortOrder, &w.ForgeProvider)
 	w.IsGit = isGit != 0
+	if w.Icon != nil {
+		t := workspaceIconThumb(*w.Icon) // workspaceicon.go: clients only draw a small square
+		w.Icon = &t
+	}
 	return w, err
 }
 
@@ -186,5 +190,11 @@ func (a *App) SaveTerminalTabs(workspaceID int64, tabs []TerminalTab) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// The thread feed (tray panel, phone) follows tabs off this instead of
+	// re-reading shell_snapshot on a timer.
+	busEmit("terminal-tabs-changed", map[string]int64{"workspaceId": workspaceID})
+	return nil
 }

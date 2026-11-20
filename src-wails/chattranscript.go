@@ -58,13 +58,9 @@ const (
 // token, which is unshippable to a phone on a train.
 const chatMessagesChangedPrefix = "chat-messages-changed-"
 
-// ChatMessagesChanged is the changed tail of a chat's transcript. FromIndex is
-// the index of Messages[0] in the whole transcript, so a client splices
-// `messages[fromIndex:] = messages`.
-type ChatMessagesChanged struct {
-	FromIndex int           `json:"fromIndex"`
-	Messages  []ChatMessage `json:"messages"`
-}
+// The payload is a ChatSplice (chatsplice.go): FromIndex is the index of
+// Messages[0] in the whole transcript, so a client splices
+// `messages[fromIndex:] = messages` — when baseRev matches the rev it holds.
 
 // chatTail is one chat's folded transcript in memory. It is authoritative
 // while the app runs — LoadChatMessages serves it rather than reading the
@@ -129,6 +125,10 @@ type chatTail struct {
 	// path and the fold path contend on, and it has to exist for a chat
 	// neither has touched yet — that is the whole point.
 	loaded bool
+
+	// adoptedNow: adoption ran inside this fold call. Its catch-up changed
+	// rows no splice has carried, so the call widens its splice over them.
+	adoptedNow bool
 }
 
 func newChatTail() *chatTail {
@@ -212,10 +212,29 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 			batchFrom = i
 		}
 	}
+	if t.adoptedNow {
+		t.adoptedNow = false
+		if t.dirtyFrom < t.length() {
+			widen(t.dirtyFrom)
+		}
+	}
 	settled := false
+	// Pure text growth of the streaming row goes out as chat-tail appends
+	// (chatsplice.go), not as a splice per delta.
+	type tailAppend struct {
+		index        int
+		kind, before string
+		text         string
+	}
+	var tails []tailAppend
 
 	for _, ev := range events {
 		if isTurnBoundary(ev.Type) {
+			if ev.Type == EvtTurnCompleted || ev.Type == EvtTurnFailed {
+				if i := t.stampTurnMs(time.Now()); i >= 0 {
+					widen(i)
+				}
+			}
 			if hasPartial(t.st.messages) {
 				settleTranscript(t.st.messages)
 				widen(t.turnStart)
@@ -225,8 +244,24 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 			continue
 		}
 		before := len(t.st.messages)
+		var lastBefore ChatMessage
+		if before > 0 {
+			lastBefore = t.st.messages[before-1]
+		}
 		if !applyChatEvent(t.st, ev) {
 			continue
+		}
+		if (ev.Type == EvtTextDelta || ev.Type == EvtThinkingDelta) && before > 0 &&
+			len(t.st.messages) == before && lastBefore.Partial {
+			if last := t.st.messages[before-1]; last.Role == lastBefore.Role &&
+				len(last.Text) == len(lastBefore.Text)+len(ev.Text) && last.Text[len(lastBefore.Text):] == ev.Text {
+				kind := "text"
+				if last.Role == "thinking" {
+					kind = "thinking"
+				}
+				tails = append(tails, tailAppend{len(t.adopted) + before - 1, kind, lastBefore.Text, ev.Text})
+				continue
+			}
 		}
 		switch {
 		case len(t.st.messages) > before:
@@ -261,11 +296,37 @@ func (a *App) foldChatLine(chatID string, ord int64, events []ProviderRuntimeEve
 	}
 
 	if batchFrom >= 0 {
-		busEmit(chatMessagesChangedPrefix+chatID, ChatMessagesChanged{
-			FromIndex: batchFrom,
-			Messages:  t.slice(batchFrom),
-		})
+		// A structural change in the same line: its splice carries the
+		// appended text too.
+		for _, tl := range tails {
+			widen(tl.index)
+		}
+		a.emitSplice(w, chatID, t, batchFrom, false)
+	} else if len(tails) > 0 {
+		lg := w.spliceLog(chatID, t.persistedOrd)
+		for _, tl := range tails {
+			lg.addTail(chatID, tl.index, tl.kind, tl.before, tl.text)
+		}
 	}
+}
+
+// stampTurnMs sets turnMs (turn start → now) on the user row that opened the
+// turn ending now — the first user row since turnStart that arrived live —
+// and returns its index, or -1. Go owns this; clients no longer patch it in.
+// A turn spanning an app restart (its user row adopted) gets none.
+func (t *chatTail) stampTurnMs(now time.Time) int {
+	for j := max(t.turnStart-len(t.adopted), 0); j < len(t.st.messages); j++ {
+		m := &t.st.messages[j]
+		if m.Role != "user" {
+			continue
+		}
+		if m.At == 0 || m.TurnMs != 0 {
+			return -1
+		}
+		m.TurnMs = max(int(now.UnixMilli()-m.At), 1)
+		return len(t.adopted) + j
+	}
+	return -1
 }
 
 // persistChatTail is the transaction the phase's whole invariant rests on:
@@ -434,6 +495,7 @@ func (a *App) lockFoldTail(w *chatStreamWriter, chatID string, upTo int64) *chat
 // client's whole-transcript write.
 func (a *App) adoptChatTail(t *chatTail, w *chatStreamWriter, chatID string, upTo int64) {
 	t.loaded = true
+	t.adoptedNow = true
 	t.lastSave = time.Now()
 
 	if id, err := strconv.Atoi(chatID); err == nil {
@@ -478,6 +540,9 @@ func (a *App) adoptChatTail(t *chatTail, w *chatStreamWriter, chatID string, upT
 	folded, haveMarker, _ := w.foldedOrd(chatID)
 	t.foldedOrd = folded
 	t.persistedOrd = folded
+	// A page read from the table reported this rev; the first splice builds
+	// on it. An existing log (a re-adoption after a rewind) keeps its own.
+	w.spliceLog(chatID, folded)
 
 	if !haveMarker && len(t.adopted) > 0 {
 		// Stored rows with NO marker: the config.json import and every client
@@ -559,26 +624,38 @@ func (w *chatStreamWriter) forgetChatTail(chatID string) {
 // this process has not folded it. The in-memory copy is authoritative while
 // the app runs: the table lags it by up to one coalescing window.
 func (w *chatStreamWriter) chatTailMessages(chatID string) []ChatMessage {
+	msgs, _, _ := w.chatTailSnapshot(chatID)
+	return msgs
+}
+
+// chatTailSnapshot is chatTailMessages plus the splice revision those rows
+// are current as of, read under the tail's lock (splices are emitted under
+// it, so the pair is consistent). ok = false: nothing usable in memory.
+func (w *chatStreamWriter) chatTailSnapshot(chatID string) ([]ChatMessage, int64, bool) {
 	w.mu.Lock()
 	t := w.tails[chatID]
 	w.mu.Unlock()
 	if t == nil {
-		return nil
+		return nil, 0, false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !t.loaded {
 		// Created as a lock target, never adopted: it holds no transcript.
-		return nil
+		return nil, 0, false
 	}
 	if t.noPersist {
 		// This tail has no idea what the stored prefix is, so its combined
 		// view would show a transcript that starts mid-conversation. Report
 		// "nothing in memory" and let the caller read the table: stale but
 		// true beats short and wrong, and the read may well succeed now.
-		return nil
+		return nil, 0, false
 	}
-	return t.combined()
+	lg := w.spliceLog(chatID, t.persistedOrd)
+	lg.mu.Lock()
+	rev := lg.rev
+	lg.mu.Unlock()
+	return t.combined(), rev, true
 }
 
 // lockChatTail returns the chat's tail with ITS mu already held, or nil when

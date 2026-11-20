@@ -208,6 +208,14 @@ export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = [], pinn
     if (!group) byRepo.set(repoId, (group = { repoId, rows: [] }));
     group.rows.push(row);
   }
+  // Repo's own rows first, then each worktree's rows as one block (first-seen
+  // order) so the Sidebar can put the worktree's name above its block.
+  for (const group of byRepo.values()) {
+    const first = new Map<number, number>();
+    group.rows.forEach((r, i) => { if (!first.has(r.ws.id)) first.set(r.ws.id, i); });
+    const key = (r: ActivityRow) => (r.ws.parent_id == null ? -1 : first.get(r.ws.id)!);
+    group.rows.sort((a, b) => key(a) - key(b)); // stable: feed order within a block
+  }
   for (const id of [...alwaysShow, ...pinned]) if (!byRepo.has(id)) byRepo.set(id, { repoId: id, rows: [] });
   // Pinned first, then the manual (dragged) order, then the rest in feed order.
   const rank = (id: number) =>
@@ -219,4 +227,59 @@ export function groupByRepo(rows: ActivityRow[], alwaysShow: number[] = [], pinn
 export function parseShortstat(out: string): { added: number; removed: number } {
   const num = (re: RegExp) => Number(out.match(re)?.[1] ?? 0);
   return { added: num(/(\d+) insertions?\(\+\)/), removed: num(/(\d+) deletions?\(-\)/) };
+}
+
+/**
+ * A project's rows with the ones waiting on the user first (threadbear's inbox,
+ * per project): `needs` is how many lead. The rest keep their order, so the
+ * worktree blocks below stay intact.
+ */
+export function needsYouFirst<T>(rows: T[], needsYou: (row: T) => boolean): { rows: T[]; needs: number } {
+  const needs = rows.filter(needsYou);
+  if (!needs.length) return { rows, needs: 0 };
+  return { rows: [...needs, ...rows.filter((r) => !needsYou(r))], needs: needs.length };
+}
+
+/**
+ * ⌥⌘↓: the next row waiting on the user after the one on screen, wrapping;
+ * from anywhere else, the first. null = nothing waits (caught up).
+ */
+export function nextNeedsYou<T>(rows: T[], needsYou: (row: T) => boolean, isActive: (row: T) => boolean): T | null {
+  const waiting = rows.filter(needsYou);
+  if (!waiting.length) return null;
+  const at = rows.findIndex(isActive);
+  if (at < 0) return waiting[0];
+  return rows.slice(at + 1).find(needsYou) ?? (waiting[0] === rows[at] ? null : waiting[0]);
+}
+
+/**
+ * After archiving the open row `current`: the Inbox row after it (wrapping),
+ * else any other row that needs you. null = inbox zero.
+ */
+export function nextAfterArchive<T>(inbox: T[], all: T[], current: T, needsYou: (row: T) => boolean): T | null {
+  const at = inbox.indexOf(current);
+  const order = at < 0 ? inbox : [...inbox.slice(at + 1), ...inbox.slice(0, at)];
+  return order[0] ?? all.find((r) => r !== current && needsYou(r)) ?? null;
+}
+
+/**
+ * The global Inbox (threadbear): rows that need you, then unread ones, lifted
+ * out of their project groups (never out of `keep`, e.g. Pinned) in feed
+ * order. A group left empty by the lift goes; one that was already empty
+ * (the active project, a pinned one) stays.
+ */
+export function liftInbox<T, G extends { repoId: number; rows: T[] }>(
+  groups: G[],
+  needsYou: (row: T) => boolean,
+  unread: (row: T) => boolean,
+  keep: (repoId: number) => boolean,
+): { inbox: T[]; needs: number; groups: G[] } {
+  const lifted = (r: T) => needsYou(r) || unread(r);
+  const pool = groups.filter((g) => !keep(g.repoId)).flatMap((g) => g.rows);
+  const needs = pool.filter(needsYou);
+  const inbox = [...needs, ...pool.filter((r) => !needsYou(r) && unread(r))];
+  const rest = groups
+    .map((g) => (keep(g.repoId) ? g : { ...g, rows: g.rows.filter((r) => !lifted(r)) }))
+    .filter((g, i) => g.rows.length > 0 || groups[i].rows.length === 0);
+  return { inbox, needs: needs.length, groups: rest };
 }

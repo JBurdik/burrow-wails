@@ -216,6 +216,28 @@ spoofed User-Agent: Burrow is not a first-party client. Codex: a short-lived
 after failure); a provider routed through Bedrock / Vertex / an API key in
 `~/.claude/settings.json` is reported as not applicable.
 
+### Reply buttons (`src-wails/chatactions.go`, `src/lib/replyActions.ts`)
+
+An agent's ```action block becomes a button in its reply (threadbear's reply buttons). Why each piece:
+
+- **Go presses, from the stored reply.** The client sends only `(chatId, msgIndex, actionIndex)`; Go re-reads the
+  transcript row and parses the block itself. A client (or a paired phone) can't make a button run a brief or reach a
+  target the agent never wrote.
+- **Same numbering on both sides.** Every *closed* ```action fence counts, also one that doesn't parse (it renders as a
+  code block but keeps its index) — otherwise one malformed block would shift every later button onto the wrong job.
+  An unclosed fence is still streaming and counts nowhere.
+- **Once, by CAS.** `chat_action_presses (chat_id, msg_index, action_index)` is the claim: INSERT, or flip a `failed`
+  row back to `running`; zero rows affected = already pressed. No in-memory lock, so it holds across windows, the phone
+  and a restart.
+- **The writer's authority, at press time.** `capabilityProblem` runs with the chat that wrote the button as caller —
+  pressing must not hand a default-mode thread what its own `spawn` / `chat_send` would be refused. `new_thread` is a
+  sub-agent of the writer (the spawn verb's shape: result notices come back, depth stays one level).
+- **The agent hears it.** `submit` appends `[Pressed: <label>]` for unreported done presses, so "go ahead" after a
+  press doesn't start the same job twice.
+- **Indexes are transcript indexes**, so rewind / clear / delete drop presses at or after the cut.
+
+iOS native doesn't render buttons yet (the block shows as code).
+
 ### Transcript search (`src-wails/chatsearch.go`)
 
 Spotlight's "IN CHATS" section is `SearchChats(query, limit)` over an FTS5 table `chat_fts`.
@@ -266,10 +288,26 @@ is whether the component exists rather than a predicate someone can forget.
 
 Backing it, every agent line is also appended to SQLite `chat_stream(chat_id,
 ord, kind, line)` before it is emitted, and the event payload is `{ord, kind,
-line}`. `chat_stream_state.folded_ord` records how far the frontend has folded
-that log into `chat_messages` (written in the same transaction as the messages),
-so the trim can never delete a line nobody rendered. After a restart,
-`replayChatStream()` catches a chat up from `folded_ord`.
+line}`. `chat_stream_state.folded_ord` records how far Go has folded that log
+into `chat_messages` (written in the same transaction as the messages), so the
+trim can never delete an unfolded line. Clients never fold or save: they render
+Go's versioned splices (ADR 0001, `src/lib/transcriptSplice.ts`) and catch up with
+`chat_subscribe(sinceRev)` after a page read, a gap or a reconnect.
+
+**One reply across automatic follow-ups** (from threadbear's wait gap,
+`~/threadbear/docs/wait-gap-design`). A thread that waits on a sub-agent writes "still
+running", then minutes later — in a turn Go started by itself — "it's back". Drawn as
+two turns, the notice Go sent sat in a user bubble between them and each half got its
+own Worked fold, so the thread read as a conversation the user never had. Go now marks
+every prompt it sends on its own (sub-agent notice, a schedule into its chat, the limit /
+network / restart resumes) with `auto: {kind, label}` on the `chat-user` line; the
+user's queued follow-ups stay unmarked because the user typed them. The transcript rule
+(`transcriptRows.ts` = `Transcript.swift`, `fixtures/transcript-rows.json`) treats only
+an unmarked user row as the start of a turn: a marked one is a thin divider with the
+wait (from the rows' `at`) and the label, its text one click away, and the follow-up's
+work joins the same Worked fold. While the follow-up runs, the fold covers what settled
+before its divider and the rest stays live. Older rows have no marker and render as
+before, so nothing is refolded.
 
 ### Provider protocol is parsed in Go (`src-wails/providerruntime.go`)
 
@@ -286,11 +324,10 @@ The frontend previously had **three** partial parsers (`onLine` in
 get a correct transcript without re-implementing the protocol to its own depth.
 The parse belongs to whoever owns the process.
 
-What is left on the frontend is rendering: `src/lib/chatProjection.ts` turns
-events into `ChatMessage[]` (append-to-partial, tool-result matching), and
-`AgentChat.onEvents` does what only a mounted view can — scroll, notify, account
-for the turn. `LoadChatEventsSince` replays the recorded log as events, which is
-what `replayChatStream()` uses.
+The fold into `ChatMessage[]` (append-to-partial, tool-result matching) is Go's
+too (`chatfold.go`) since ADR 0001: a client-side copy of it drifted from Go's and
+was a second transcript writer. What is left on the frontend is live state from the
+events — `chatSession.onEvents` keeps busy, notifications and turn accounting.
 
 **Still on the raw channel, deliberately** — these are UI decisions, not
 transcript: the control/permission protocol, Claude `system/init`, the ACP
@@ -445,8 +482,7 @@ the PTY keeps running server-side for the next reattach) and `send_float_snapsho
 `notify_float_grid`/`open_git_panel_window` (stay on Wails bindings because they answer
 over `runtime.EventsEmit`, which only the native window ever receives, or serve the
 removed float-window feature outright) — plus a few cases that reshape args before
-forwarding (`list_pty_sessions` normalizes daemon ids into session records,
-`save_chat_messages` restores the `foldedOrd ?? -1` sentinel the old switch supplied).
+forwarding (`list_pty_sessions` normalizes daemon ids into session records).
 
 **`remoteapi.go`'s `remoteAllowed`** is the security boundary: wire command name → `App`
 method + positional argument names + a `remoteScope`. Argument names live in the table,
@@ -574,8 +610,8 @@ resumes exactly as well as one it just dropped.
 high-volume **and** already replayable from a durable log of its own: `pty-data-*` (the
 daemon numbers and rings it per PTY, below) and the chat channels
 `claude-data-*`, `acp-data-*`, `acp-req-*`, `chat-event-*` (persisted to `chat_stream`
-with an `ord` before they are ever emitted; `replayChatStream`/`LoadChatEventsSince` catch
-a client up from `chat_stream_state.folded_ord`). This is not only about the cost of
+with an `ord` before they are ever emitted; a client catches its transcript up with
+`chat_subscribe(sinceRev)`). This is not only about the cost of
 ringing them — it is what makes resume work at all. One streaming agent emits hundreds of
 chat lines per turn, so ringing them would churn all 512 slots in seconds and every
 reconnect would come back a `resync`, making the ring dead weight. What is left is shell
@@ -895,6 +931,7 @@ forgot the policy the moment it existed.
 - **Claude** — `-p --output-format json --json-schema <inline> [--model] [--effort]`, answer read from the envelope's `structured_output`. `claudeCliEffort` mirrors their `normalizeClaudeCliEffort`: `ultracode`→`xhigh` (it is a settings flag), `ultrathink` dropped (it is a prompt-prefix mode) — neither is a `--effort` value.
 - **Codex** — `exec --ephemeral --skip-git-repo-check -s read-only --config model_reasoning_effort="…" --output-schema <file> --output-last-message <file> -`. **`--output-schema` is what makes Codex answer in JSON at all**; without it it replies in prose as often as not, and scraping an object out of that silently dropped whole generations. Effort defaults to `low` (their `CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT`) rather than whatever the user's `config.toml` says.
 - **Gemini / OpenCode** — prose-tolerant: `extractGeneratedJSON` digs the object out of a fenced or prefixed answer, and a bare title still reaches a caller that can use one.
+- **Apple** (`apple::apple::system`) — Apple's on-device Foundation Model (macOS 26+, Apple Intelligence on) through the **`burrow-fm`** sidecar, a single Swift file (`src-wails/cmd/burrow-fm/main.swift`) built by `swiftc` into the bundle next to `burrow-daemon` / `burrow-mcp` and signed with them. A sidecar rather than cgo: the framework is Swift-only (no C/ObjC surface), and a separate binary keeps Swift out of the Go build and the headless/Linux build. Same contract as the CLIs: prompt on stdin, `--schema` takes the JSON Schema and turns it into a `DynamicGenerationSchema` (the subset textgen uses: object, string + enum, array, number, integer, boolean), so the answer is guided generation, not scraped prose; `--check` exits 0 only when the model is ready. Free, offline, ~1 s warm (~5 s cold) for titles / branch names — but the context is **8192 tokens** (input + output). Measured on commit diffs: fine to ~9k chars, filler at ~21k chars ("Update project files"), a context-size error at ~27k. So a prompt over `appleMaxPromptChars` (12 000 chars, a character proxy for tokens) skips it and goes straight to `claude-haiku-5-5`, and every other failure (Apple Intelligence off, model not downloaded, overflow, no sidecar) falls back there via `textGenFallback`. Settings lists it only when `text_gen_apple_available` (`TextGenAppleAvailable` = `burrow-fm --check`) is true — or while it is the stored choice, so the picker never shows blank.
 
 Every generated string passes a sanitizer before it reaches git or the UI
 (`sanitizeCommitSubject`, `sanitizePrTitle`, `sanitizeChatTitle`,

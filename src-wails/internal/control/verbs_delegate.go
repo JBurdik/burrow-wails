@@ -46,7 +46,7 @@ func delegationVerbs(c *Core) []Verb {
 			{Name: "agent", Type: "string", Desc: "Agent instance to run (name or id from list_agents); defaults to the user's default"},
 			{Name: "model", Type: "string", Desc: "Model override for this task, e.g. claude-haiku-4-5-20251001 for mechanical work. list_agents lists each agent's models"},
 			{Name: "effort", Type: "string", Desc: "Chat sub-agent's reasoning effort (one the model lists in list_agents); defaults to the parent's when the sub-agent runs on the parent's runtime"},
-			{Name: "permission_mode", Type: "string", Desc: "Chat sub-agent's permission mode: plan, default, acceptEdits, auto, dontAsk or full-access; defaults to the profile's, else the parent thread's own. Never more permissive than the parent"},
+			{Name: "permission_mode", Type: "string", Desc: "Omit it: the sub-agent runs in the profile's mode, else the parent thread's own. Pass one only when the user asked for a specific mode: default, acceptEdits, auto, dontAsk or full-access (never more permissive than the parent; plan is ignored — a read-only task says so in its text)"},
 			{Name: "cwd", Type: "string", Desc: "Directory to run in — a worktree path for isolated work (a chat sub-agent needs a Burrow workspace: make it with create_worktree first); defaults to the caller's"},
 			{Name: "workspace_id", Type: "integer", Desc: "Run in this workspace (its path wins over cwd), e.g. a project just made with workspace_create. With detach + target chat, starts a new top-level thread there with task as its first prompt"},
 			{Name: "target", Type: "string", Desc: "tab (default; live terminal, result capture) or chat (structured). Ignored when spawning from a chat thread — that sub-agent is always a chat — unless detach is set"},
@@ -118,8 +118,11 @@ func delegationVerbs(c *Core) []Verb {
 			if lines > 500 {
 				lines = 500
 			}
-			var out any
-			return out, c.ui(ctx, "tab_output", map[string]any{"ptyId": p.Int("pty_id"), "lines": lines}, &out)
+			text, err := c.tabText(ctx, p.Int("pty_id"), lines)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"pty_id": p.Int("pty_id"), "text": text}, nil
 		},
 	}, {
 		Name:    "send_to_tab",
@@ -297,20 +300,18 @@ func (c *Core) waitForTabTail(ctx context.Context, id int64, changedFrom string)
 			}
 		}
 		if !blocked {
-			var tail struct {
-				Text string `json:"text"`
-			}
-			if err := c.ui(ctx, "tab_output", map[string]any{"ptyId": id, "lines": 12}, &tail); err != nil {
+			tail, err := c.tabText(ctx, id, 12)
+			if err != nil {
 				return "", fmt.Errorf("send_to_tab: read terminal: %w", err)
 			}
-			if strings.TrimSpace(tail.Text) != "" && tail.Text != changedFrom {
-				if tail.Text == previous {
+			if strings.TrimSpace(tail) != "" && tail != changedFrom {
+				if tail == previous {
 					stable++
 				} else {
-					previous, stable = tail.Text, 1
+					previous, stable = tail, 1
 				}
 				if stable >= 3 {
-					return tail.Text, nil
+					return tail, nil
 				}
 			} else {
 				previous, stable = "", 0
@@ -595,4 +596,20 @@ func (c *Core) takeResult(token string) (string, bool) {
 	_ = os.Remove(base + ".done")
 	_ = os.Remove(base + ".result")
 	return strings.TrimSpace(string(text)), true
+}
+
+// tabText is the tail of a tab's terminal as plain text: from the daemon's
+// emulator when it has one (works with no window open), else from the mounted
+// xterm through the UI — same text contract either way.
+func (c *Core) tabText(ctx context.Context, ptyID, lines int64) (string, error) {
+	if c.deps.Screen != nil {
+		if text, err := c.deps.Screen.ScreenText(fmt.Sprint(ptyID), int(lines)); err == nil {
+			return text, nil
+		}
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	err := c.ui(ctx, "tab_output", map[string]any{"ptyId": ptyID, "lines": lines}, &out)
+	return out.Text, err
 }

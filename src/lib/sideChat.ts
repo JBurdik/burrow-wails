@@ -1,6 +1,8 @@
 import { reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import { explainPrompt } from "@/lib/transcriptFeedback";
+import { newClientId } from "@/lib/offline";
 
 /** Which side chat the Side chat surface shows, per parent chat id. Module
  *  state so the composer's "Side chat" button can point the surface at the
@@ -16,4 +18,12 @@ export async function newSideChat(parentChatId: number): Promise<number> {
   await useClaudeChatsStore().reload();
   sideChatSelection[parentChatId] = chat.id;
   return chat.id;
+}
+
+/** Explain on the transcript's selection bar: a new side chat whose first
+ *  prompt asks about `quote` — the parent thread is never touched. */
+export async function explainInSideChat(parentChatId: number, quote: string): Promise<number> {
+  const id = await newSideChat(parentChatId);
+  await invoke("chat_submit", { chatId: id, text: explainPrompt(quote), images: [], clientId: newClientId() });
+  return id;
 }

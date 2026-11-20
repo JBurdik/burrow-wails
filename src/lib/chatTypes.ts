@@ -26,6 +26,9 @@ export interface ChatMessage {
   toolRawName?: boolean; // true when `text` is a raw tool name (native transport) vs already-human ACP title
   turnMs?: number;      // on a user message: how long the turn it opened took (persisted with the message)
   _acpMsgId?: string;   // ACP messageId — identity for incremental chunk append
+  /** user row Go sent on its own (sub-agent notice, schedule, resume — userLine.Auto): drawn as a wait divider. */
+  auto?: { kind: string; label: string };
+  clientId?: string;    // user row: the submit client id (chatsubmit.go) — what an echo is matched by
   uuid?: string;        // latest Claude record uuid behind this message — the rewind/fork resume point (chatrewind.go)
   at?: number;          // epoch ms the row arrived live (Go fold / chat session) — the visit watermark's clock; absent on older rows
   // Set on a "system-info" row that records a spawn: the thread delegated, and
@@ -35,6 +38,8 @@ export interface ChatMessage {
   subagentAgent?: string;
   /** system-info row that opens this Right Panel surface when clicked. */
   surface?: string;
+  /** Go's fold: a finished plumbing call (taken end_turn, ToolSearch) — not shown. */
+  plumbing?: boolean;
 }
 
 /** A user prompt held until the active turn reaches a terminal boundary. */

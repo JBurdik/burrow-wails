@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createTransport, MAX_CONNECT_FAILURES, MAX_IN_FLIGHT } from "./transport";
+import { createTransport, MAX_CONNECT_FAILURES, MAX_IN_FLIGHT, WAKE_PROBE_MS } from "./transport";
 import { createBackoff } from "./reconnectBackoff";
 
 /** Minimal scriptable WebSocket stand-in. */
@@ -278,6 +278,29 @@ describe("createTransport", () => {
       ws.deliver({ t: "reply", id: ws.lastCall().id, result: "ok" });
       await expect(p).resolves.toBe("ok");
     });
+
+    it("fires resync once it recovers, so loads that failed while unreachable re-run", async () => {
+      FakeWS.instances = [];
+      let url = "";
+      const t = createTransport(async () => ({ wsUrl: url, ticket: "t" }), {
+        WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+        backoff: fastBackoff(),
+        maxConnectFailures: 2,
+      });
+      const resyncs = vi.fn();
+      t.onResync(resyncs);
+      await drain();
+      await expect(t.invoke("boot-load")).rejects.toThrow(/unreachable/i);
+      url = "ws://x/v2/ws";
+      await drain(5);
+      FakeWS.instances[FakeWS.instances.length - 1].open();
+      expect(resyncs).toHaveBeenCalledTimes(1);
+      // A plain drop + reconnect (never unreachable) resumes instead.
+      FakeWS.instances[FakeWS.instances.length - 1].close();
+      await drain(5);
+      FakeWS.instances[FakeWS.instances.length - 1].open();
+      expect(resyncs).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("rejects invoke() called after close() instead of leaving it pending", async () => {
@@ -525,5 +548,84 @@ describe("protocol revision handshake", () => {
     await tick();
     openWith(FakeWS.instances[0], { rev: 1, minClientRev: 1 });
     expect(why).toHaveBeenCalledWith("core-old");
+  });
+});
+
+describe("wake (app back from background)", () => {
+  function setupSlow() {
+    FakeWS.instances = [];
+    const getEndpoint = vi.fn(async () => ({ wsUrl: "ws://x/v2/ws", ticket: "t" + FakeWS.instances.length }));
+    const t = createTransport(getEndpoint, {
+      WebSocketImpl: FakeWS as unknown as typeof WebSocket,
+      // A backoff long enough that only wake() can explain a prompt reconnect.
+      backoff: createBackoff({ baseMs: 60_000, maxMs: 60_000, jitter: () => 0 }),
+    });
+    return t;
+  }
+
+  it("keeps a socket that answers the probe", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setupSlow();
+      await vi.advanceTimersByTimeAsync(0);
+      const ws = FakeWS.instances[0];
+      ws.open();
+      t.wake();
+      const probe = ws.lastCall();
+      expect(probe.t).toBe("call");
+      ws.deliver({ t: "reply", id: probe.id, error: { code: "unknown_command", message: "x" } });
+      await vi.advanceTimersByTimeAsync(WAKE_PROBE_MS * 2);
+      expect(FakeWS.instances).toHaveLength(1);
+      expect(ws.readyState).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces a silent socket and rejects its calls, without waiting for close", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setupSlow();
+      await vi.advanceTimersByTimeAsync(0);
+      const dead = FakeWS.instances[0];
+      dead.open();
+      dead.close = () => {}; // iOS: a killed socket never reports its close
+      const call = t.invoke("list_chats");
+      const rejected = expect(call).rejects.toThrow("disconnected");
+      t.wake();
+      await vi.advanceTimersByTimeAsync(WAKE_PROBE_MS);
+      await rejected;
+      expect(FakeWS.instances).toHaveLength(2);
+      // The dead socket's late frames and close are not dispatched any more.
+      expect(dead.onmessage).toBeNull();
+      expect(dead.onclose).toBeNull();
+      const fresh = FakeWS.instances[1];
+      fresh.open();
+      const states: boolean[] = [];
+      t.onState((u) => states.push(u));
+      expect(states).toEqual([true]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips the backoff when the socket is already down", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setupSlow();
+      await vi.advanceTimersByTimeAsync(0);
+      FakeWS.instances[0].open();
+      FakeWS.instances[0].close(); // next attempt scheduled 60 s out
+      await vi.advanceTimersByTimeAsync(0);
+      expect(FakeWS.instances).toHaveLength(1);
+      t.wake();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(FakeWS.instances).toHaveLength(2);
+      // the cancelled timer must not open a third socket later
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(FakeWS.instances).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

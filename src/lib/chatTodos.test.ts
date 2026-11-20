@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { applyChatEvent, type ChatProjectionState } from "./chatProjection";
 import type { ChatMessage } from "./chatTypes";
 import { latestTodos } from "./chatTodos";
 
@@ -30,22 +29,5 @@ describe("latestTodos", () => {
   it("returns [] with no TodoWrite, and ignores an ACP title that happens to match", () => {
     expect(latestTodos([{ id: 1, role: "user", text: "hi" }])).toEqual([]);
     expect(latestTodos([{ id: 1, role: "tool", text: "TodoWrite", toolInput: { todos: [{ content: "x", status: "pending" }] } }])).toEqual([]);
-  });
-
-  it("reads a Codex plan, which Go projects as a TodoWrite row (acpPlanEvents)", () => {
-    // What NormalizeAcpLine emits for Codex `turn/plan/updated` → ACP `plan`.
-    const state: ChatProjectionState = { messages: [], nextMsgId: 1 };
-    const plan = (todos: unknown[]) => {
-      applyChatEvent(state, { type: "tool.started", toolCallId: "acp-plan", name: "TodoWrite", input: { todos } });
-      applyChatEvent(state, { type: "tool.completed", toolCallId: "acp-plan" });
-    };
-    plan([{ content: "Read code", status: "in_progress" }, { content: "Fix", status: "pending" }]);
-    applyChatEvent(state, { type: "text.delta", messageId: "acp:m1", text: "working" });
-    plan([{ content: "Read code", status: "completed" }, { content: "Fix", status: "in_progress" }]);
-    expect(state.messages.filter((m) => m.text === "TodoWrite").every((m) => m.toolOutput === "")).toBe(true);
-    expect(latestTodos(state.messages)).toEqual([
-      { content: "Read code", status: "completed" },
-      { content: "Fix", status: "in_progress" },
-    ]);
   });
 });

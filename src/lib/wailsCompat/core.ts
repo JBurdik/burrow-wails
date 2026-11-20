@@ -16,7 +16,8 @@ import {
 } from "./bindings/burrow/desktopservice";
 import { isDesktop } from "./desktop";
 import { createTransport, type Incompatible, type Transport } from "@/runtime/transport";
-import { desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
+import { activeEnvironmentId, desktopUsesRemote, loadRemoteCredentials, remoteEndpointSource, setActiveEnvironment } from "@/runtime/remoteEndpoint";
+import { CACHED_READS, cacheClear, cacheRead, cacheWrite } from "@/runtime/remoteCache";
 
 type Args = Record<string, any>;
 
@@ -97,6 +98,7 @@ export function desktopTransport(): Transport {
       const info = await LocalEndpoint();
       return { wsUrl: info.ws_url, ticket: info.ticket };
     }), true);
+    wakeOnReturn(); // a Mac that slept leaves the window on a dead "connected" socket too
   }
   return transport;
 }
@@ -112,8 +114,35 @@ export function desktopTransport(): Transport {
  * the credentials appear.
  */
 export function remoteTransport(): Transport {
-  if (!remote) remote = watchIncompatible(createTransport(remoteEndpointSource(loadRemoteCredentials)), false);
+  if (!remote) {
+    remote = watchIncompatible(createTransport(remoteEndpointSource(loadRemoteCredentials)), false);
+    wakeOnReturn();
+  }
   return remote;
+}
+
+/**
+ * iOS kills a backgrounded PWA's socket without a close event; coming back,
+ * the app sat on a dead "connected" socket (or a 10 s backoff) until a call
+ * timed out. Coming back to the foreground or online wakes the transport.
+ */
+let wakeHooked = false;
+function wakeOnReturn(): void {
+  if (wakeHooked || typeof window === "undefined") return;
+  wakeHooked = true;
+  const wake = () => (remote ?? transport)?.wake();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") wake();
+  });
+  window.addEventListener("pageshow", wake);
+  window.addEventListener("online", wake);
+  window.addEventListener("focus", wake);
+  // A socket can also die while the page stays in front (Wi-Fi → cellular, a
+  // NAT timeout): nothing fires, calls hang, events stop. Probe every 10 s
+  // while visible; wake() drops a socket that doesn't answer in 2.5 s.
+  setInterval(() => {
+    if (document.visibilityState === "visible") wake();
+  }, 10_000);
 }
 
 /**
@@ -124,10 +153,30 @@ export function remoteTransport(): Transport {
  * cannot miss one.
  */
 export function switchEnvironment(id: string | null, reload: () => void = () => location.reload()): void {
+  const prev = activeEnvironmentId();
+  if (prev) cacheClear(prev);
   setActiveEnvironment(id);
   remote?.close();
   remote = null;
   reload();
+}
+
+/** True when this context talks to a paired machine over the network (the
+ *  phone, or a desktop window driving another Mac) — the only case where the
+ *  offline outbox, the read cache and the connection indicator apply. */
+export function remoteActive(): boolean {
+  const t = activeTransport();
+  return t !== null && t === remote;
+}
+
+/**
+ * The last reply of a `CACHED_READS` read from the active paired machine, for
+ * a first paint before the socket opens; null on the desktop's own backend.
+ * Never a substitute for the live call — callers seed with it, then load.
+ */
+export function cachedRead<T>(cmd: string): T | null {
+  const env = remoteActive() ? activeEnvironmentId() : null;
+  return env ? cacheRead<T>(env, cmd) : null;
 }
 
 /** Which transport this context can use, or null before pairing. */
@@ -198,17 +247,6 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
         .map((pty_id) => ({ pty_id, cwd: "", title: "", alive: true })) as T;
     }
 
-    // foldedOrd -1 is the "don't know" sentinel, which leaves the existing
-    // fold mark alone (chatstore.go writes it only when >= 0). An absent
-    // argument is the zero value 0 on the Go side — a real ordinal — and one
-    // call site (AgentChat's localStorage migration) omits it, so the
-    // sentinel has to be supplied here, exactly as the old switch did.
-    case "save_chat_messages":
-      return t.invoke<T>("save_chat_messages", {
-        ...args,
-        foldedOrd: args.foldedOrd ?? -1,
-      });
-
     // The desktop-only snapshot/window protocol stays on the Wails bindings —
     // the only calls that still do, apart from LocalEndpoint above, which is
     // the socket's own bootstrap rather than an app action.
@@ -248,5 +286,12 @@ export async function invoke<T = unknown>(cmd: string, args: Args = {}): Promise
       return NotifyFloatGrid(String(args.ptyId ?? args.pty_id), args.cols, args.rows) as unknown as Promise<T>;
   }
 
+  if (CACHED_READS.has(cmd) && t === remote) {
+    const env = activeEnvironmentId();
+    return t.invoke<T>(cmd, args).then((v) => {
+      if (env && env === activeEnvironmentId()) cacheWrite(env, cmd, v);
+      return v;
+    });
+  }
   return t.invoke<T>(cmd, args);
 }

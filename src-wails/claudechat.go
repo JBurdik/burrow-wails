@@ -130,7 +130,7 @@ func claudePermMode(permissionMode string) string {
 		return "auto"
 	case "full-access", "bypassPermissions":
 		return "bypassPermissions"
-	case "acceptEdits", "dontAsk":
+	case "acceptEdits", "dontAsk", "plan":
 		return permissionMode
 	}
 	return "default"
@@ -179,6 +179,10 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 		sys += "\n\n" + s
 	}
 	args = append(args, "--append-system-prompt", sys)
+	// A turn that ends without end_turn is sent back once to make the call
+	// (bin/burrow end-turn-gate): the rule alone loses to a task that says
+	// "do nothing else", and to a turn that asked via AskUserQuestion.
+	args = append(args, "--settings", endTurnGateSettings(filepath.Join(a.burrowBinDir, "burrow")))
 	// Allowlisted so the model id can't smuggle extra argv.
 	if strings.HasPrefix(l.Model, "claude-") {
 		args = append(args, "--model", l.Model)
@@ -222,7 +226,8 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 	// thread to attribute it to (see addBurrowEnvForChat) — omitted, not "0",
 	// when id doesn't parse, same reasoning as there.
 	if chatID := chatIDOf(id); chatID > 0 {
-		env = append(env, "BURROW_CHAT_ID="+strconv.FormatInt(chatID, 10))
+		env = append(env, "BURROW_CHAT_ID="+strconv.FormatInt(chatID, 10),
+			"BURROW_CALLER_TOKEN="+a.callerKeyEnv("chat", chatID))
 	}
 
 	return a.claudeMgr().Start(id, bin, args, cwd, env,
@@ -238,6 +243,12 @@ func (a *App) startClaude(id, cwd, resumeSessionID string, l ClaudeLaunch) error
 // ClaudeSend wraps the prompt in the stream-json `user` envelope the CLI reads
 // on stdin. Images are data URIs ("data:<mime>;base64,<data>").
 func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
+	return a.claudeSend(id, text, sessionID, images, "")
+}
+
+// claudeSend is ClaudeSend plus `hidden`: an extra text block the agent reads
+// with this prompt but the transcript never shows (chatsamework.go).
+func (a *App) claudeSend(id, text, sessionID string, images []string, hidden string) error {
 	content := []any{}
 	for _, uri := range images {
 		rest, ok := strings.CutPrefix(uri, "data:")
@@ -258,6 +269,9 @@ func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
 		})
 	}
 	content = append(content, map[string]any{"type": "text", "text": text})
+	if hidden != "" {
+		content = append(content, map[string]any{"type": "text", "text": hidden})
+	}
 
 	msg, err := json.Marshal(map[string]any{
 		"type":       "user",
@@ -280,7 +294,7 @@ func (a *App) ClaudeSend(id, text, sessionID string, images []string) error {
 	if err := a.claudeWrite(id, string(msg)); err != nil {
 		return fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 	}
-	a.emitChatLine(id, chatUserKind, text)
+	a.recordSentUserLine(id, text, images)
 	return nil
 }
 

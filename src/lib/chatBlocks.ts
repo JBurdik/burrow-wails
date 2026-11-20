@@ -18,6 +18,8 @@
 // DOMPurify like any other markdown, so every value is escaped on the way in.
 
 import { Marked, type Tokens } from "marked";
+import { renderOptions } from "@/lib/optionsBlock";
+import { renderActionBlock } from "@/lib/replyActions";
 
 const plainMarked = new Marked({ gfm: true });
 
@@ -151,6 +153,35 @@ export function renderMermaidPlaceholder(text: string): string {
   return `<div class="cm-mermaid" data-mermaid-src="${encodeURIComponent(text)}">`
     + `<div class="cm-tools"><span class="cm-label">Diagram</span><button type="button" data-cm-action="copy" title="Copy source">Copy</button><button type="button" data-cm-action="open" title="Open full size">Open</button></div>`
     + `<div class="cm-diagram"><pre><code class="language-mermaid">${src}</code></pre></div></div>`;
+}
+
+// ── shell blocks ────────────────────────────────────────────────────────────
+
+// Not `console`: those blocks mix commands with their output.
+const SHELL_LANGS = new Set(["bash", "sh", "zsh", "shell", "fish"]);
+const MAX_SHELL_RUN = 8000;
+
+/**
+ * True when a command carries characters that could make what is shown differ
+ * from what runs: control chars (bar tab/newline), bidi overrides, zero-width
+ * and other format chars, line/paragraph separators. Such a block gets no ▶.
+ */
+export function hasHiddenChars(cmd: string): boolean {
+  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}]/u.test(cmd.replace(/[\n\t]/g, ""));
+}
+
+/** A ```bash block with Run-in-terminal (types it at the prompt, no Enter) and Copy. */
+export function renderShellBlock(lang: string, text: string): string {
+  let cmd = text.replace(/\n+$/, "");
+  // A transcript-style "$ cmd" block: drop the prompt only when every line has one.
+  const lines = cmd.split("\n").filter((l) => l.trim());
+  if (lines.length && lines.every((l) => /^\s*\$ /.test(l))) cmd = cmd.replace(/^(\s*)\$ /gm, "$1");
+  const run = hasHiddenChars(cmd) || cmd.length > MAX_SHELL_RUN
+    ? ""
+    : `<button type="button" data-sh-action="run" title="Type it at the prompt of the Right Panel terminal — you press Return">▶ Run in terminal</button>`;
+  return `<div class="cm-shell" data-shell-src="${encodeURIComponent(cmd)}">`
+    + `<div class="cm-tools"><span class="cm-label">${escapeHtml(lang)}</span>${run}<button type="button" data-sh-action="copy" title="Copy command">Copy</button></div>`
+    + `<pre><code class="language-${escapeHtml(lang)}">${escapeHtml(cmd)}</code></pre></div>`;
 }
 
 // ── html preview ────────────────────────────────────────────────────────────
@@ -340,8 +371,11 @@ const chatMarked = new Marked({
       const lang = (token.lang ?? "").trim().split(/\s+/)[0];
       if (lang === "visual") return renderVisual(token.text) ?? false;
       if (lang === "questions") return renderQuestions(token.text, answeredCtx) ?? false;
+      if (lang === "action" && fenceClosed(token.raw)) return renderActionBlock(token.text) ?? false;
+      if (lang === "options" && fenceClosed(token.raw)) return renderOptions(token.text, answeredCtx) ?? false;
       if (lang === "mermaid" && token.text.trim() && fenceClosed(token.raw)) return renderMermaidPlaceholder(token.text);
       if (isHtmlBlock(lang, token.text) && fenceClosed(token.raw)) return renderHtmlBlock(token.text);
+      if (SHELL_LANGS.has(lang) && token.text.trim() && fenceClosed(token.raw)) return renderShellBlock(lang, token.text);
       return false;
     },
   },

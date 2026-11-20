@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -153,13 +154,29 @@ func generateTextJSON(cwd, selection, prompt, schema string) ([]byte, error) {
 // Haiku 4.5, because a CLI older than the 5.5 release rejects its id. Effort is
 // dropped (Haiku 4.5 takes no --effort). "" = no retry.
 func textGenFallback(selection string) string {
-	if sel := parseTextGenerationSelection(selection); sel.provider == "claude" && sel.model == "claude-haiku-5-5" {
+	switch sel := parseTextGenerationSelection(selection); {
+	case sel.provider == "claude" && sel.model == "claude-haiku-5-5":
 		return "claude::claude::claude-haiku-4-5-20251001"
+	case sel.provider == "apple":
+		// The on-device model is small (8192-token context) and unavailable
+		// whenever Apple Intelligence is off, so every failure goes to Claude.
+		return appleTextGenFallback
 	}
 	return ""
 }
 
+const appleTextGenFallback = "claude::claude::claude-haiku-5-5"
+
+// appleMaxPromptChars: above this the on-device model either overflows its
+// context or (measured on a ~21k-char commit diff) answers with filler, so the
+// prompt goes straight to the fallback. ponytail: char count, not tokens —
+// switch to burrow-fm counting tokens if the cut lands badly.
+const appleMaxPromptChars = 12000
+
 func generateTextJSONContext(ctx context.Context, cwd, selection, prompt, schema string) ([]byte, error) {
+	if parseTextGenerationSelection(selection).provider == "apple" && len(prompt) > appleMaxPromptChars {
+		selection = appleTextGenFallback
+	}
 	out, err := generateTextJSONOnce(ctx, cwd, selection, prompt, schema)
 	if fallback := textGenFallback(selection); err != nil && fallback != "" && ctx.Err() == nil {
 		return generateTextJSONOnce(ctx, cwd, fallback, prompt, schema)
@@ -290,9 +307,53 @@ func generateTextJSONOnce(ctx context.Context, cwd, selection, prompt, schema st
 			return nil, errors.New(strings.TrimSpace(string(out)))
 		}
 		return extractGeneratedJSON(out)
+	case "apple":
+		// Apple's on-device Foundation Model through the burrow-fm sidecar
+		// (cmd/burrow-fm, Swift): same contract, schema-guided generation.
+		bin := burrowFMBinary()
+		if bin == "" {
+			return nil, errors.New("burrow-fm sidecar not found")
+		}
+		c := exec.CommandContext(ctx, bin, "--schema", schema)
+		c.Dir = cwd
+		c.Stdin = strings.NewReader(prompt)
+		out, err := c.Output()
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				return nil, errors.New(strings.TrimSpace(string(ee.Stderr)))
+			}
+			return nil, err
+		}
+		return extractGeneratedJSON(out)
 	default:
 		return nil, errors.New("selected provider does not support background text generation")
 	}
+}
+
+// burrowFMBinary is the Apple Foundation Models sidecar next to the executable,
+// else one on PATH (a `go run` dev build has no bundle), or "".
+func burrowFMBinary() string {
+	if exe, err := os.Executable(); err == nil {
+		path := filepath.Join(filepath.Dir(exe), "burrow-fm")
+		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+			return path
+		}
+	}
+	path, _ := exec.LookPath("burrow-fm")
+	return path
+}
+
+// TextGenAppleAvailable reports whether the "apple" provider can answer here:
+// the burrow-fm sidecar exists and the on-device model is ready (Apple
+// Intelligence on, model downloaded). Settings hides the option otherwise.
+func (a *App) TextGenAppleAvailable() bool {
+	bin := burrowFMBinary()
+	if bin == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, bin, "--check").Run() == nil
 }
 
 func writeTempFile(pattern, content string) (string, error) {

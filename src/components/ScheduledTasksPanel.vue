@@ -13,6 +13,8 @@ interface Rule { kind: "once" | "interval" | "weekly"; every_min?: number; weekd
 interface Scheduled {
   id: number; chat_id: number; name: string; text: string; due_at: string; rule: Rule; recurs: string;
   new_chat: boolean; workspace_id?: number; agent?: string; paused: boolean; last_run_at?: string; last_error?: string;
+  /** Pre-run check command; set only by an agent's `schedule --check`, read-only here. */
+  check?: string;
 }
 
 const chats = useClaudeChatsStore();
@@ -184,6 +186,7 @@ const btn = "rounded-[var(--radius-button)] border border-border px-2.5 py-1 tex
         <div class="mt-0.5 truncate text-[11px] text-muted-foreground">
           {{ targetLabel(s) }} · {{ s.recurs }} · {{ s.paused ? "Paused" : `next ${when(s.due_at)}` }}<template v-if="s.last_run_at"> · last {{ when(s.last_run_at) }}</template>
         </div>
+        <div v-if="s.check" class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" :title="`Runs first; prints nothing = this run is skipped\n${s.check}`">check: {{ s.check }}</div>
         <div v-if="s.last_error" class="mt-0.5 truncate text-[11px] text-warning" :title="s.last_error">{{ s.last_error }}</div>
       </div>
       <div class="flex shrink-0 gap-1">

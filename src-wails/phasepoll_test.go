@@ -301,3 +301,49 @@ func TestClaudeStatusFileFallsBack(t *testing.T) {
 		t.Fatal("pid 0 must disable the file")
 	}
 }
+
+// Plan 010 Phase 4: the daemon's emulator says what the name cannot.
+func TestPollAltScreenTUIIsNeverRunning(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "vim"}}
+	p := newPhasePoller(s, f.list, f.foreground)
+	alt := false
+	p.screen = func(string) (bool, bool) { return alt, false }
+
+	p.tick() // vim before its first frame: indistinguishable from a command
+	if s.Get("pty:7").State != agentphase.Running {
+		t.Fatalf("setup: want running, got %+v", s.Get("pty:7"))
+	}
+	alt = true
+	p.tick()
+	if got := s.Get("pty:7"); got.State != agentphase.Idle || got.TurnEndedAt != 0 {
+		t.Fatalf("alt-screen TUI must be idle with no turn end, got %+v", got)
+	}
+	f.fg["7"] = "zsh"
+	p.tick()
+	if got := s.Get("pty:7"); got.State != agentphase.Idle || got.TurnEndedAt != 0 {
+		t.Fatalf("quitting vim must leave no review dot, got %+v", got)
+	}
+}
+
+func TestPollMarkedPromptOfAnUnknownShellSettles(t *testing.T) {
+	t.Cleanup(busReset)
+	busReset()
+	s, _ := newTestStore(t)
+	f := &fakePty{sessions: []string{"7"}, fg: map[string]string{"7": "make"}}
+	p := newPhasePoller(s, f.list, f.foreground)
+	atPrompt := false
+	p.screen = func(string) (bool, bool) { return false, atPrompt }
+
+	p.tick()
+	if s.Get("pty:7").State != agentphase.Running {
+		t.Fatalf("setup: want running, got %+v", s.Get("pty:7"))
+	}
+	f.fg["7"], atPrompt = "nu", true // nushell: not in shellRE, marks its prompt
+	p.tick()
+	if got := s.Get("pty:7"); got.State != agentphase.Done {
+		t.Fatalf("an OSC 133 prompt must settle like a known shell, got %+v", got)
+	}
+}

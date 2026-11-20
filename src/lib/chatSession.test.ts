@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
-import { chatSession, dropChatSession, liveChatSessionIds, replayChatStream, type ChatSessionDeps, type ChatViewHooks } from "./chatSession";
+import { chatSession, dropChatSession, liveChatSessionIds, type ChatSessionDeps, type ChatViewHooks } from "./chatSession";
+import type { ChatMessage } from "./chatTypes";
 import type { ChatHost } from "./chatHost";
 
 /** A session wired to fakes: a listen that records handlers, a recording host. */
@@ -31,7 +32,9 @@ function fakeDeps() {
     host,
   } as unknown as ChatSessionDeps;
   const emit = (name: string, payload: unknown) => handlers.get(name)?.({ payload });
-  return { deps, host, invoke: fakeInvoke, emit };
+  let reconnect: (() => void) | null = null;
+  (deps as { onReconnect: (cb: () => void) => () => void }).onReconnect = (cb) => { reconnect = cb; return () => { reconnect = null; }; };
+  return { deps, host, invoke: fakeInvoke, emit, reconnect: () => reconnect?.() };
 }
 
 function fakeView(over: Partial<ChatViewHooks> = {}): ChatViewHooks {
@@ -65,12 +68,24 @@ async function endTurn(s: Session, f: Fake) {
   await s.listenEvents();
   f.emit(`chat-event-${s.chatId}`, { ord: 0, events: [{ type: "turn.completed" }] });
 }
-/** foldedOrd the next save hands to Go — lastOrd + 1, the trim-safety mark. */
-function savedFoldedOrd(s: Session, f: Fake): number {
-  s.save();
-  const calls = f.invoke.mock.calls as unknown as Array<[string, { foldedOrd: number }]>;
-  return calls.filter(([cmd]) => cmd === "save_chat_messages").pop()![1].foldedOrd;
+const msg = (role: ChatMessage["role"], text: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({ id: 0, role, text, ...extra });
+/**
+ * Answer the transcript reads like Go: `load_chat_messages_page` from `page`,
+ * `chat_subscribe` with `subscribe(sinceRev)` (default: nothing new). Other
+ * commands fall through to `other`.
+ */
+function fakeGo(f: Fake, page: { messages: ChatMessage[]; start?: number; rev: number },
+  subscribe: (sinceRev: number) => unknown = (sinceRev) => ({ rev: sinceRev, splices: [], inProgress: null }),
+  other: (cmd: string, args: Record<string, unknown>) => unknown = () => undefined) {
+  f.invoke.mockImplementation((async (cmd: string, args: Record<string, unknown>) => {
+    if (cmd === "load_chat_messages_page") return { messages: page.messages, start: page.start ?? 0, total: (page.start ?? 0) + page.messages.length, rev: page.rev };
+    if (cmd === "chat_subscribe") return subscribe(args.sinceRev as number);
+    return other(cmd, args);
+  }) as never);
 }
+const splice = (baseRev: number, rev: number, fromIndex: number, messages: ChatMessage[], authoritative = false) =>
+  ({ baseRev, rev, fromIndex, messages, ...(authoritative ? { authoritative } : {}) });
+const texts = (s: Session) => s.messages.value.map((m) => m.text);
 
 // The eviction rule is the whole point of the registry: an idle chat may be
 // forgotten when nobody is looking at it, a busy one may not — that is what
@@ -143,49 +158,68 @@ describe("chat session eviction", () => {
   });
 });
 
-describe("replay after restart", () => {
-  beforeEach(() => invoke.mockReset());
-
-  it("replays domain events, not raw lines", () => {
-    // Raw would also re-open permission requests that were answered before the
-    // restart; a replay should rebuild the transcript and nothing else.
+// Go is the only writer of the transcript (ADR 0001): the session renders its
+// page + splices + tails and never folds or saves anything itself.
+describe("Go's transcript", () => {
+  it("loads the newest page, then subscribes from its rev to close the race", async () => {
     const f = fakeDeps();
-    const { deps, invoke: fake } = f;
-    const s = chatSession(10, deps);
-    fake.mockImplementation((async (cmd: string) => {
-      if (cmd === "chat_folded_ord") return 4;
-      if (cmd === "load_chat_events_since") {
-        return [
-          { ord: 4, events: [{ type: "text.delta", messageId: "c1", text: "a" }] },
-          { ord: 6, events: [{ type: "tool.started", toolCallId: "t1", name: "Bash" }, { type: "turn.completed" }] },
-        ];
-      }
-      return undefined;
-    }) as never);
-
-    return replayChatStream(10).then(async () => {
-      expect(s.messages.value.map((m) => m.role)).toEqual(["assistant", "tool"]);
-      expect(fake).toHaveBeenCalledWith("load_chat_events_since", { chatId: 10, since: 4 });
-      // The replayed batches count as folded on the next save.
-      expect(savedFoldedOrd(s, f)).toBe(7);
-
-      // Idempotent: a second mount must not double-feed.
-      await replayChatStream(10);
-      expect(s.messages.value).toHaveLength(2);
-      dropChatSession(10);
-    });
+    const s = chatSession(10, f.deps);
+    fakeGo(f, { messages: [msg("user", "hi"), msg("assistant", "hel", { partial: true })], rev: 5 },
+      () => ({ rev: 6, splices: [splice(5, 6, 1, [msg("assistant", "hello", { partial: true })])], inProgress: { index: 1, text: "hello wor" } }));
+    expect(await s.loadTranscript()).toBe(true);
+    expect(f.invoke).toHaveBeenCalledWith("chat_subscribe", { chatId: 10, sinceRev: 5 });
+    expect(texts(s)).toEqual(["hi", "hello wor"]);
+    expect(s.messages.value.map((m) => m.id)).toEqual([0, 1]);
+    // Nothing is ever written back.
+    expect(f.invoke.mock.calls.map(([c]) => c)).not.toContain("save_chat_messages");
+    dropChatSession(10);
   });
 
-  it("does nothing for a chat with no folded mark", async () => {
-    const { deps, invoke: fake } = fakeDeps();
-    const s = chatSession(11, deps);
-    // folded_ord 0 means "nothing folded" — replaying from 0 would duplicate a
-    // history that chat_messages already holds.
-    fake.mockImplementation((async () => 0) as never);
-    await replayChatStream(11);
-    expect(s.messages.value).toEqual([]);
-    expect(fake).not.toHaveBeenCalledWith("load_chat_events_since", expect.anything());
+  it("applies a chain of splices and tails, drops a stale tail, and catches up on a gap", async () => {
+    const f = fakeDeps();
+    const view = fakeView();
+    const s = chatSession(11, f.deps);
+    s.attachView(view);
+    fakeGo(f, { messages: [msg("user", "hi")], rev: 3 },
+      (since) => since === 4 ? { rev: 7, splices: [splice(4, 7, 1, [msg("assistant", "hello there")])], inProgress: null } : { rev: since, splices: [], inProgress: null });
+    await s.loadTranscript();
+    f.emit("chat-messages-changed-11", splice(3, 4, 1, [msg("assistant", "he", { partial: true })]));
+    expect(texts(s)).toEqual(["hi", "he"]);
+    f.emit("chat-tail-11", { rev: 4, index: 1, offset: 2, append: "llo", kind: "text" });
+    f.emit("chat-tail-11", { rev: 4, index: 1, offset: 2, append: "llo", kind: "text" }); // repeat: harmless
+    f.emit("chat-tail-11", { rev: 3, index: 1, offset: 0, append: "STALE", kind: "text" });
+    expect(texts(s)).toEqual(["hi", "hello"]);
+    expect(view.scrollToBottom).toHaveBeenCalled();
+    // rev 5–6 missed: the splice is dropped and chat_subscribe(4) fills the hole.
+    f.emit("chat-messages-changed-11", splice(6, 7, 1, [msg("assistant", "WRONG")]));
+    await vi.waitFor(() => expect(texts(s)).toEqual(["hi", "hello there"]));
+    expect(f.invoke).toHaveBeenCalledWith("chat_subscribe", { chatId: 11, sinceRev: 4 });
     dropChatSession(11);
+  });
+
+  it("applies an authoritative rewind and clear, and catches up after a reconnect", async () => {
+    const f = fakeDeps();
+    const s = chatSession(12, f.deps);
+    fakeGo(f, { messages: [msg("user", "a"), msg("assistant", "b"), msg("user", "c")], rev: 9 },
+      (since) => ({ rev: 30, splices: [splice(since, 30, 0, [msg("user", "fresh")])], inProgress: null }));
+    await s.loadTranscript();
+    // The first subscribe moved it to rev 30 already.
+    f.emit("chat-messages-changed-12", splice(1, 31, 1, [], true));
+    expect(texts(s)).toEqual(["fresh"]);
+    f.emit("chat-messages-changed-12", splice(31, 32, 0, [], true));
+    expect(texts(s)).toEqual([]);
+    f.reconnect();
+    await vi.waitFor(() => expect(f.invoke).toHaveBeenCalledWith("chat_subscribe", { chatId: 12, sinceRev: 32 }));
+    dropChatSession(12);
+  });
+
+  it("does not apply splices before its page is read", async () => {
+    const f = fakeDeps();
+    const s = chatSession(13, f.deps);
+    await s.listenEvents();
+    f.emit("chat-messages-changed-13", splice(0, 1, 0, [msg("assistant", "x")], true));
+    expect(s.messages.value).toEqual([]);
+    dropChatSession(13);
   });
 });
 
@@ -305,19 +339,12 @@ describe("queued follow-ups (Go's chat_queue)", () => {
     dropChatSession(40);
   });
 
-  it("migrates queued rows of an older build into Go's queue once, in order", async () => {
+  it("does not show legacy `queued` rows still in Go's transcript", async () => {
     const f = fakeDeps();
-    const q = fakeQueue(f);
     const s = chatSession(41, f.deps);
-    s.hydrate({ messages: [
-      { id: 4, role: "queued", text: "first" },
-      { id: 5, role: "assistant", text: "working" },
-      { id: 6, role: "queued", text: "second", images: ["data:image/png;base64,x"] },
-    ] });
-    await vi.waitFor(() => expect(q.items().length).toBe(2));
-    expect(q.items().map((i) => [i.text, i.attachments])).toEqual([["first", []], ["second", ["data:image/png;base64,x"]]]);
+    fakeGo(f, { messages: [msg("queued", "first"), msg("assistant", "working")], rev: 1 });
+    await s.loadTranscript();
     expect(s.messages.value.map((m) => m.role)).toEqual(["assistant"]);
-    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).toContain("save_chat_messages");
     dropChatSession(41);
   });
 
@@ -423,29 +450,26 @@ describe("stream reducers", () => {
     dropChatSession(62);
   });
 
-  it("drops its own prompt's echo, and settles a finished turn with a notification", async () => {
+  it("keeps its prompt as an echo until Go's row with that client id arrives, and notifies a finished turn", async () => {
     const f = fakeDeps();
     const { deps, host, emit } = f;
     const s = chatSession(63, deps);
     s.attachView(fakeView());
-    await s.listenEvents();
-    s.postUserMessage({ text: "hi" });
+    fakeGo(f, { messages: [], rev: 1 });
+    await s.loadTranscript();
+    s.postUserMessage({ text: "hi", displayText: "hi [paste]", clientId: "c1" });
     s.startTurn();
-    emit("chat-event-63", { ord: 2, events: [
-      { type: "user.delta", messageId: "acp:user:2", text: "hi" },
-      { type: "text.delta", messageId: "m", text: "hello" },
-      { type: "tool.started", toolCallId: "t", name: "Bash" },
-      { type: "turn.completed", inputTokens: 3, outputTokens: 4 },
-    ] });
-    expect(s.messages.value.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+    // Text alone never matches an echo.
+    emit("chat-messages-changed-63", splice(1, 2, 0, [msg("user", "hi")]));
+    expect(texts(s)).toEqual(["hi", "hi"]);
+    emit("chat-messages-changed-63", splice(2, 3, 0, [msg("user", "hi", { clientId: "c1", turnMs: 0 }), msg("assistant", "hello")]));
+    expect(s.messages.value.map((m) => [m.role, m.id])).toEqual([["user", 0], ["assistant", 1]]);
+    // The composer's paste chips stay on Go's row.
+    expect(s.messages.value[0].displayText).toBe("hi [paste]");
+    emit("chat-event-63", { ord: 2, events: [{ type: "turn.completed", inputTokens: 3, outputTokens: 4 }] });
     expect(s.busy.value).toBe(false);
-    // A tool row with no completion is settled, not left spinning.
-    expect(s.messages.value[2].toolOutput).toBe("");
     expect(host.recordTurn).toHaveBeenCalledWith(3, 4);
     expect(host.notifyDone).toHaveBeenCalledWith(63, false);
-    expect(savedFoldedOrd(s, f)).toBe(3);
-    // The turn clock stamped the bubble that opened the turn.
-    expect(s.messages.value[0].turnMs).toBeGreaterThanOrEqual(0);
     dropChatSession(63);
   });
 
@@ -472,7 +496,6 @@ describe("stream reducers", () => {
     emit("chat-event-65", { ord: 1, events: [{ type: "turn.completed" }] });
     emit("chat-event-65", { ord: 2, events: [{ type: "message.note", role: "system-info", text: "Changed 3 files", surface: "outputs" }] });
     expect(s.busy.value).toBe(false);
-    expect(s.messages.value[s.messages.value.length - 1]?.text).toBe("Changed 3 files");
     dropChatSession(65);
   });
 
@@ -537,69 +560,65 @@ describe("stream reducers", () => {
     dropChatSession(66);
   });
 
-  it("settles a turn whose process died mid-turn, marking stuck tools failed", async () => {
+  it("settles a turn whose process died mid-turn", async () => {
     const { deps, emit } = fakeDeps();
     const s = chatSession(67, deps);
     await s.listenEvents();
     s.startTurn();
     emit("chat-event-67", { ord: 1, events: [{ type: "tool.started", toolCallId: "t", name: "Bash" }, { type: "session.exited" }] });
     expect(s.busy.value).toBe(false);
-    expect(s.messages.value[0].toolFailed).toBe(true);
     dropChatSession(67);
   });
 
-  it("a runtime reset drops every pending request, closes the partial and goes idle", async () => {
+  it("a runtime reset drops every pending request and its marker, and goes idle", async () => {
     const f = fakeDeps();
     const { deps, emit } = f;
     const s = chatSession(68, deps);
     await s.listenEvents();
     s.startTurn();
-    emit("chat-event-68", { ord: 1, events: [{ type: "text.delta", messageId: "m", text: "half" }] });
     await nativeRequest(s, f, "Bash", { command: "ls" });
     await acpRequest(s, f, codexApproval(4));
     expect(s.pendingRequests.value.length).toBe(2);
-    expect(s.messages.value.some((m) => m.partial)).toBe(true);
+    expect(s.messages.value.filter((m) => m.role === "system-info")).toHaveLength(2);
 
     emit("chat-event-68", { ord: 3, events: [{ type: "session.reset" }] });
     expect(s.pendingRequests.value).toEqual([]);
     expect(s.busy.value).toBe(false);
-    expect(s.messages.value.some((m) => m.partial)).toBe(false);
-    expect(s.messages.value.some((m) => m.text === "half")).toBe(true);
+    expect(s.messages.value).toEqual([]);
     dropChatSession(68);
   });
 
-  it("a cleared reset also empties the transcript and restarts the ord", async () => {
+  it("a cleared reset drops the session id and this client's own rows", async () => {
     const f = fakeDeps();
     const { deps, emit } = f;
     const s = chatSession(69, deps);
     await s.listenEvents();
-    emit("chat-event-69", { ord: 40, events: [{ type: "text.delta", messageId: "m", text: "old" }, { type: "turn.completed" }] });
     s.hydrate({ sessionId: "sess" });
+    s.notice("an error");
     emit("chat-event-69", { ord: 0, events: [{ type: "session.reset", cleared: true }] });
     expect(s.messages.value).toEqual([]);
     expect(s.sessionId.value).toBe("");
-    expect(savedFoldedOrd(s, f)).toBe(1);
     dropChatSession(69);
   });
 });
 
 // The process intents forward to the Go chat runtime, whatever the transport.
 describe("process intents", () => {
-  it("sends through chat_send: bubble, busy, the wire call", async () => {
+  it("submits through chat_submit: bubble, busy, the wire call", async () => {
     const f = fakeDeps();
     const s = chatSession(80, f.deps);
     const id = await s.send({ text: "go", images: ["data:x"] });
     expect(id).not.toBeNull();
     expect(s.busy.value).toBe(true);
     expect(s.messages.value.map((m) => [m.role, m.text])).toEqual([["user", "go"]]);
-    expect(f.invoke).toHaveBeenCalledWith("chat_send", { chatId: 80, text: "go", images: ["data:x"] });
+    expect(f.invoke).toHaveBeenCalledWith("chat_submit", { chatId: 80, text: "go", images: ["data:x"], clientId: expect.any(String) });
     dropChatSession(80);
   });
 
   it("a failed send reports itself and leaves the turn", async () => {
     const f = fakeDeps();
     f.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "chat_send") throw "pipe closed";
+      if (cmd === "chat_submit") throw "pipe closed";
       return undefined;
     });
     const s = chatSession(81, f.deps);
@@ -627,7 +646,7 @@ describe("process intents", () => {
 // One door for every answer. The prompt-clearing rules differ per protocol and
 // used to be spread over six functions in the view.
 describe("answering a pending request", () => {
-  it("allows a native permission, remembers an always-rule, and leaves a receipt", async () => {
+  it("allows a native permission and remembers an always-rule, leaving the receipt to Go", async () => {
     const f = fakeDeps();
     const { deps, host, invoke: fake } = f;
     const s = chatSession(70, deps);
@@ -637,7 +656,8 @@ describe("answering a pending request", () => {
     expect(fake).toHaveBeenCalledWith("claude_respond_control", { id: 70, requestId: "r-Bash", response: { behavior: "allow", updatedInput: { command: "git push" } } });
     expect(host.addPermissionRule).toHaveBeenCalledWith("Bash:git");
     expect(s.pendingRequests.value).toEqual([]);
-    expect(s.messages.value[s.messages.value.length - 1]?.text).toBe("✓ Always allowed: Bash — git push");
+    // The receipt row is Go's now (chatreceipts.go); the marker is gone.
+    expect(s.messages.value).toEqual([]);
     dropChatSession(70);
   });
 
@@ -712,63 +732,62 @@ describe("answering a pending request", () => {
 // A long chat is opened from its tail. The window must never be written back as
 // the whole transcript — save_chat_messages replaces the chat's stored rows.
 describe("a windowed transcript", () => {
-  const msg = (id: number, role: "user" | "assistant" = "user") => ({ id, role, text: `m${id}` });
+  const rows = (from: number, n: number) => Array.from({ length: n }, (_, i) => msg(i % 2 ? "assistant" : "user", `m${from + i}`));
 
-  it("does not save while earlier messages are not loaded, and saves once they are", async () => {
+  it("loads earlier rows in front of the window", async () => {
     const f = fakeDeps();
     const s = chatSession(90, f.deps);
-    s.hydrate({ messages: [msg(8), msg(9)], hiddenBefore: 8 });
+    fakeGo(f, { messages: rows(8, 2), start: 8, rev: 1 });
+    await s.loadTranscript();
     expect(s.hiddenBefore.value).toBe(8);
-
-    s.save();
-    expect(f.invoke.mock.calls.some(([cmd]) => cmd === "save_chat_messages")).toBe(false);
-
-    f.invoke.mockResolvedValueOnce({ messages: Array.from({ length: 8 }, (_, i) => msg(i)), start: 0, total: 10 });
+    f.invoke.mockResolvedValueOnce({ messages: rows(0, 8), start: 0, total: 10 });
     await s.loadEarlier();
     expect(f.invoke).toHaveBeenCalledWith("load_chat_messages_page", { chatId: 90, before: 8, limit: 60 });
     expect(s.messages.value.map((m) => m.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(s.hiddenBefore.value).toBe(0);
-
-    s.save();
-    expect(f.invoke.mock.calls.some(([cmd]) => cmd === "save_chat_messages")).toBe(true);
     dropChatSession(90);
   });
 
-  it("offsets the rewind index by what is not loaded", async () => {
+  it("rewinds by the row's transcript index, and never a local row", async () => {
     const f = fakeDeps();
     const s = chatSession(91, f.deps);
-    s.hydrate({ messages: [msg(8), msg(9, "assistant"), msg(10)], hiddenBefore: 8 });
+    fakeGo(f, { messages: rows(8, 3), start: 8, rev: 1 });
+    await s.loadTranscript();
+    s.notice("local");
     await s.rewind(s.messages.value[2] as never);
     expect(f.invoke).toHaveBeenCalledWith("chat_rewind", { chatId: 91, index: 10, text: "m10" });
+    expect(await s.rewind(s.messages.value[3] as never)).toBe(false);
     dropChatSession(91);
+  });
+
+  it("anchors its own rows where they happened, not at the bottom", async () => {
+    const f = fakeDeps();
+    const s = chatSession(98, f.deps);
+    fakeGo(f, { messages: rows(0, 1), rev: 1 });
+    await s.loadTranscript();
+    s.notice("Could not copy");
+    f.emit("chat-messages-changed-98", splice(1, 2, 1, [msg("assistant", "later")]));
+    expect(texts(s)).toEqual(["m0", "Could not copy", "later"]);
+    dropChatSession(98);
   });
 });
 
 describe("images left out of a transcript page", () => {
-  const withStub = () => ({ id: 1, role: "user" as const, text: "look", images: ["burrow-image://7/0", "data:image/png;base64,AAAA"] });
-
   it("are fetched by their stub and replaced in place", async () => {
     const f = fakeDeps();
     const s = chatSession(92, f.deps);
-    s.hydrate({ messages: [withStub()] });
+    fakeGo(f, { messages: [msg("user", "look", { images: ["burrow-image://0/0", "data:image/png;base64,AAAA"] })], rev: 1 });
+    await s.loadTranscript();
+    f.invoke.mockClear();
     f.invoke.mockResolvedValueOnce("data:image/png;base64,REAL");
     const row = s.messages.value[0];
     expect(await s.loadImage(row, 0)).toBe("data:image/png;base64,REAL");
-    expect(f.invoke).toHaveBeenCalledWith("load_chat_image", { chatId: 92, index: 7, image: 0 });
+    expect(f.invoke).toHaveBeenCalledWith("load_chat_image", { chatId: 92, index: 0, image: 0 });
     expect(s.messages.value[0].images).toEqual(["data:image/png;base64,REAL", "data:image/png;base64,AAAA"]);
     // an inline image needs no round trip
     expect(await s.loadImage(row, 1)).toBe("data:image/png;base64,AAAA");
     expect(f.invoke).toHaveBeenCalledTimes(1);
     dropChatSession(92);
-  });
-
-  it("block saving while a stub is held — it would replace the stored image", () => {
-    const f = fakeDeps();
-    const s = chatSession(93, f.deps);
-    s.hydrate({ messages: [withStub()] });
-    s.save();
-    expect(f.invoke.mock.calls.some(([cmd]) => cmd === "save_chat_messages")).toBe(false);
-    dropChatSession(93);
   });
 });
 
@@ -815,13 +834,14 @@ describe("steer", () => {
     const b = (await s.enqueueMessage("steer me", ["data:image/png;base64,AA=="]))!;
     expect(await s.steer(b.id)).toBe(true);
     expect(f.invoke).toHaveBeenCalledWith("chat_queue_remove", { id: b.id });
-    expect(f.invoke).toHaveBeenCalledWith("chat_steer", { chatId: 71, text: "steer me", images: ["data:image/png;base64,AA=="] });
-    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_send");
+    expect(f.invoke).toHaveBeenCalledWith("chat_steer", { chatId: 71, text: "steer me", images: ["data:image/png;base64,AA=="], clientId: expect.any(String) });
+    expect(f.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("chat_submit");
+    const steerId = (f.invoke.mock.calls.find((c) => c[0] === "chat_steer")![1] as { clientId: string }).clientId;
     expect(s.messageQueue.value.map((e) => e.id)).toEqual([a.id]);
     expect(s.messages.value.filter((m) => m.role === "user").map((m) => m.text)).toEqual(["steer me"]);
     expect(s.busy.value).toBe(true);
     // Go's echo of the steered prompt is ours: no second bubble.
-    f.emit("chat-event-71", { ord: 5, events: [{ type: "user.delta", messageId: "u5", text: "steer me" }] });
+    f.emit("chat-event-71", { ord: 5, events: [{ type: "user.delta", messageId: "acp:user:5", text: "steer me", clientId: steerId }] });
     expect(s.messages.value.filter((m) => m.role === "user").length).toBe(1);
     dropChatSession(71);
   });
@@ -848,5 +868,151 @@ describe("steer", () => {
     expect(await s.steer(a!.id)).toBe(false);
     expect(f.invoke).not.toHaveBeenCalledWith("chat_steer", expect.anything());
     dropChatSession(72);
+  });
+});
+
+// A send the socket dropped under is held for the reconnect. Its echo claim
+// must go with the bubble: the held text is delivered later through Go's
+// queue, and a left-over claim swallowed that user.delta — the message never
+// showed in the transcript.
+describe("send held offline", () => {
+  it("releases the echo claim, so the delivered message still shows", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_submit") throw new Error("disconnected");
+      return undefined;
+    });
+    const s = chatSession(89, f.deps);
+    await s.listenEvents();
+    expect(await s.send({ text: "hello" })).toBeNull();
+    expect(hold).toHaveBeenCalledWith(89, "hello", undefined, expect.any(String));
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    // Reconnect: Go's queue sends it; its row arrives in a splice like any other.
+    f.emit("chat-event-89", { ord: 1, events: [{ type: "user.delta", messageId: "u1", text: "hello" }] });
+    expect(s.busy.value).toBe(false);
+    dropChatSession(89);
+  });
+});
+
+// Every typed message carries one clientId: the send, the hold and the
+// reconnect's chat_queue_add all reuse it, so Go accepts it once.
+describe("clientId + outbox ordering", () => {
+  it("holds a failed send under the clientId the send carried", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_submit") throw new Error("disconnected");
+      return undefined;
+    });
+    const s = chatSession(93, f.deps);
+    await s.send({ text: "hi" });
+    const sent = f.invoke.mock.calls.find((c) => c[0] === "chat_submit")![1] as { clientId: string };
+    expect(sent.clientId).toBeTruthy();
+    expect(hold).toHaveBeenCalledWith(93, "hi", undefined, sent.clientId);
+    dropChatSession(93);
+  });
+
+  it("queues behind held messages instead of overtaking them", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    const held = [{ id: "h1", chatId: 94, text: "earlier", at: 1 }];
+    (f.deps as ChatSessionDeps).outbox = { list: () => held, hold, drop: vi.fn() };
+    const s = chatSession(94, f.deps);
+    expect(await s.send({ text: "later" })).toBeNull();
+    expect(await s.enqueueMessage("later2")).toMatchObject({ id: -1, text: "later2" });
+    expect(f.invoke).not.toHaveBeenCalledWith("chat_submit", expect.anything());
+    expect(f.invoke).not.toHaveBeenCalledWith("chat_queue_add", expect.anything());
+    expect(hold.mock.calls.map((c) => (c as unknown[])[1])).toEqual(["later", "later2"]);
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    dropChatSession(94);
+  });
+});
+
+// chat_submit: Go decides send vs queue; the echo is matched by client id.
+describe("submit door", () => {
+  it("a queued submit drops the guessed bubble and mirrors the queue item", async () => {
+    const f = fakeDeps();
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_submit") return { sent: false, item: { id: 7, chatId: 96, text: "later", attachments: [] } };
+      return undefined;
+    });
+    const s = chatSession(96, f.deps);
+    expect(await s.submit({ text: "later" })).toEqual({ id: 7, queued: true });
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    expect(s.busy.value).toBe(false);
+    expect(s.messageQueue.value.map((q) => q.id)).toEqual([7]);
+    dropChatSession(96);
+  });
+
+  it("Go's user row with the client id replaces the echo, also on a replay", async () => {
+    const f = fakeDeps();
+    const s = chatSession(97, f.deps);
+    fakeGo(f, { messages: [], rev: 1 }, undefined, (cmd) => (cmd === "chat_submit" ? { sent: true } : undefined));
+    await s.loadTranscript();
+    await s.submit({ text: "same" });
+    const clientId = (f.invoke.mock.calls.find((c) => c[0] === "chat_submit")![1] as { clientId: string }).clientId;
+    expect(s.messages.value[0].clientId).toBe(clientId);
+    expect(s.messages.value[0].id).toBeLessThan(0);
+    const row = msg("user", "same", { clientId });
+    f.emit("chat-messages-changed-97", splice(1, 2, 0, [row]));
+    f.emit("chat-messages-changed-97", splice(1, 2, 0, [row])); // a replay of the same splice
+    expect(s.messages.value.map((m) => [m.id, m.clientId])).toEqual([[0, clientId]]);
+    // Same text, another client id (typed twice): a second bubble.
+    f.emit("chat-messages-changed-97", splice(2, 3, 1, [msg("user", "same", { clientId: "other" })]));
+    expect(s.messages.value.filter((m) => m.role === "user").length).toBe(2);
+    dropChatSession(97);
+  });
+});
+
+// The end_turn card's answer behaves like a composer message: echo now, Go's
+// composed text once it replies, retired by Go's row; held offline as an answer.
+describe("answerTurn", () => {
+  it("echoes the preview, then Go's composed text, until Go's row with the client id", async () => {
+    const f = fakeDeps();
+    const s = chatSession(98, f.deps);
+    fakeGo(f, { messages: [], rev: 1 }, undefined, (cmd) => (cmd === "chat_answer_turn" ? { sent: true, text: "> Ship?\nNo" } : undefined));
+    await s.loadTranscript();
+    const p = s.answerTurn({ picks: [{ index: 0, options: ["No"] }], extra: "" });
+    expect(s.messages.value.map((m) => m.text)).toEqual(["No"]);
+    await p;
+    const call = f.invoke.mock.calls.find((c) => c[0] === "chat_answer_turn")![1] as { clientId: string; images: string[] };
+    expect(call.images).toEqual([]);
+    expect(s.messages.value.map((m) => [m.text, m.clientId])).toEqual([["> Ship?\nNo", call.clientId]]);
+    f.emit("chat-messages-changed-98", splice(1, 2, 0, [msg("user", "> Ship?\nNo", { clientId: call.clientId })]));
+    expect(s.messages.value.map((m) => m.id)).toEqual([0]);
+    dropChatSession(98);
+  });
+
+  it("holds an answer the socket dropped under, as an answer, under the same client id", async () => {
+    const f = fakeDeps();
+    const hold = vi.fn(() => true);
+    (f.deps as ChatSessionDeps).outbox = { list: () => [], hold, drop: vi.fn() };
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_answer_turn") throw new Error("disconnected");
+      return undefined;
+    });
+    const s = chatSession(99, f.deps);
+    const picks = [{ index: 0, text: "later" }];
+    await s.answerTurn({ picks, extra: "note", images: ["data:x"] });
+    const call = f.invoke.mock.calls.find((c) => c[0] === "chat_answer_turn")![1] as { clientId: string };
+    expect(hold).toHaveBeenCalledWith(99, "later\n\nnote", ["data:x"], call.clientId, { picks, extra: "note" });
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    expect(s.busy.value).toBe(false);
+    dropChatSession(99);
+  });
+
+  it("throws Go's refusal and drops the echo", async () => {
+    const f = fakeDeps();
+    f.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "chat_answer_turn") throw new Error("the card is gone");
+      return undefined;
+    });
+    const s = chatSession(100, f.deps);
+    await expect(s.answerTurn({ picks: [{ index: 0, text: "x" }], extra: "" })).rejects.toThrow("the card is gone");
+    expect(s.messages.value.some((m) => m.role === "user")).toBe(false);
+    dropChatSession(100);
   });
 });

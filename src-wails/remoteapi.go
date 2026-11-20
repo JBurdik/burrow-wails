@@ -151,6 +151,8 @@ var remoteAllowed = map[string]remoteCmd{
 	"resize_pty":         {Method: "ResizePty", Args: []string{"id", "cols", "rows"}, Scope: scopeTerminal},
 	"kill_pty":           {Method: "KillPty", Args: []string{"id"}, Scope: scopeTerminal},
 	"pty_since":          {Method: "PtySince", Args: []string{"id", "since"}, Scope: scopeTerminal},
+	"pty_attach":         {Method: "PtyAttach", Args: []string{"id"}, Scope: scopeTerminal},
+	"pty_emulator":       {Method: "PtyEmulator", Args: nil, Scope: scopeTerminal},
 	"pty_size":           {Method: "PtySize", Args: []string{"id"}, Scope: scopeTerminal},
 	"get_pty_foreground": {Method: "GetPtyForeground", Args: []string{"id"}, Scope: scopeOrchRead},
 	"list_pty_sessions":  {Method: "ListPtySessions", Args: nil, Scope: scopeOrchRead},
@@ -188,6 +190,9 @@ var remoteAllowed = map[string]remoteCmd{
 	"push_vapid_public_key": {Method: "PushVapidPublicKey", Args: nil, Scope: scopeOrchRead},
 	"push_subscribe":        {Method: "PushSubscribe", Args: []string{deviceArg, "subscription"}, Scope: scopeOrchOperate},
 	"push_unsubscribe":      {Method: "PushUnsubscribe", Args: []string{deviceArg, "endpoint"}, Scope: scopeOrchOperate},
+	// APNs (apns.go), the native iOS app: same calling-device rule.
+	"push_subscribe_apns":   {Method: "PushSubscribeAPNs", Args: []string{deviceArg, "token", "sandbox"}, Scope: scopeOrchOperate},
+	"push_unsubscribe_apns": {Method: "PushUnsubscribeAPNs", Args: []string{deviceArg, "token"}, Scope: scopeOrchOperate},
 
 	// Pairing, desktop side. Both at access:write, including the read: the
 	// pairing code IS the credential, so handing it out is handing out the
@@ -221,7 +226,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"schedule_run_now":     {Method: "ScheduleRunNow", Args: []string{"id"}, Scope: scopeOrchOperate},
 	// The user's queued follow-ups (chatqueue.go), drained by Go.
 	"chat_queue_list":    {Method: "ChatQueueList", Args: []string{"chatId"}, Scope: scopeOrchRead},
-	"chat_queue_add":     {Method: "ChatQueueAdd", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_queue_add":     {Method: "ChatQueueAdd", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_queue_update":  {Method: "ChatQueueUpdate", Args: []string{"id", "text"}, Scope: scopeOrchOperate},
 	"chat_queue_remove":  {Method: "ChatQueueRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
 	"chat_queue_reorder": {Method: "ChatQueueReorder", Args: []string{"chatId", "ids"}, Scope: scopeOrchOperate},
@@ -264,21 +269,22 @@ var remoteAllowed = map[string]remoteCmd{
 	// budget (textgen.go) — spawning a host process and billing inference is
 	// not what a read scope should authorize, so these are operate scope
 	// despite returning only a string.
-	"run_git":                 {Method: "RunGit", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
-	"run_git_input":           {Method: "RunGitInput", Args: []string{"cwd", "args", "stdin"}, Scope: scopeOrchOperate},
-	"forge_info":              {Method: "ForgeInfo", Args: []string{"cwd"}, Scope: scopeOrchRead},
-	"forge_pr_list":           {Method: "ForgePrList", Args: []string{"cwd", "scope", "state"}, Scope: scopeOrchRead},
-	"forge_pr_view":           {Method: "ForgePrView", Args: []string{"cwd", "number"}, Scope: scopeOrchRead},
-	"forge_pr_checkout":       {Method: "ForgePrCheckout", Args: []string{"repoPath", "number", "branch", "path"}, Scope: scopeOrchOperate},
-	"forge_pr_create":         {Method: "ForgePrCreate", Args: []string{"cwd", "title", "body", "base", "head"}, Scope: scopeOrchOperate},
-	"forge_pr_merge":          {Method: "ForgePrMerge", Args: []string{"cwd", "number", "squash"}, Scope: scopeOrchOperate},
-	"set_forge_provider":      {Method: "SetForgeProvider", Args: []string{"wsId", "provider"}, Scope: scopeOrchOperate},
-	"forge_install_cli":       {Method: "ForgeInstallCLI", Args: []string{"provider"}, Scope: scopeOrchOperate},
-	"generate_commit_message": {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy", "rules"}, Scope: scopeOrchOperate},
-	"generate_chat_title":     {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
-	"generate_catch_up":       {Method: "GenerateCatchUp", Args: []string{"cwd", "model", "transcript"}, Scope: scopeOrchOperate},
-	"generate_branch_name":    {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
-	"generate_pr_content":     {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "rules", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
+	"run_git":                  {Method: "RunGit", Args: []string{"cwd", "args"}, Scope: scopeOrchOperate},
+	"run_git_input":            {Method: "RunGitInput", Args: []string{"cwd", "args", "stdin"}, Scope: scopeOrchOperate},
+	"forge_info":               {Method: "ForgeInfo", Args: []string{"cwd"}, Scope: scopeOrchRead},
+	"forge_pr_list":            {Method: "ForgePrList", Args: []string{"cwd", "scope", "state"}, Scope: scopeOrchRead},
+	"forge_pr_view":            {Method: "ForgePrView", Args: []string{"cwd", "number"}, Scope: scopeOrchRead},
+	"forge_pr_checkout":        {Method: "ForgePrCheckout", Args: []string{"repoPath", "number", "branch", "path"}, Scope: scopeOrchOperate},
+	"forge_pr_create":          {Method: "ForgePrCreate", Args: []string{"cwd", "title", "body", "base", "head"}, Scope: scopeOrchOperate},
+	"forge_pr_merge":           {Method: "ForgePrMerge", Args: []string{"cwd", "number", "squash"}, Scope: scopeOrchOperate},
+	"set_forge_provider":       {Method: "SetForgeProvider", Args: []string{"wsId", "provider"}, Scope: scopeOrchOperate},
+	"forge_install_cli":        {Method: "ForgeInstallCLI", Args: []string{"provider"}, Scope: scopeOrchOperate},
+	"generate_commit_message":  {Method: "GenerateCommitMessage", Args: []string{"cwd", "model", "policy", "rules"}, Scope: scopeOrchOperate},
+	"generate_chat_title":      {Method: "GenerateChatTitle", Args: []string{"cwd", "model", "policy", "text"}, Scope: scopeOrchOperate},
+	"generate_catch_up":        {Method: "GenerateCatchUp", Args: []string{"cwd", "model", "transcript"}, Scope: scopeOrchOperate},
+	"text_gen_apple_available": {Method: "TextGenAppleAvailable", Args: nil, Scope: scopeOrchRead},
+	"generate_branch_name":     {Method: "GenerateBranchName", Args: []string{"cwd", "model", "policy", "message"}, Scope: scopeOrchOperate},
+	"generate_pr_content":      {Method: "GeneratePrContent", Args: []string{"cwd", "model", "policy", "rules", "baseBranch", "headBranch"}, Scope: scopeOrchOperate},
 
 	// Checkpoints — pre-turn worktree snapshots (checkpoints.go)
 	"create_checkpoint":  {Method: "CreateCheckpoint", Args: []string{"cwd", "ptyId", "label"}, Scope: scopeOrchOperate},
@@ -406,25 +412,38 @@ var remoteAllowed = map[string]remoteCmd{
 	// The chat runtime (chatruntime.go): every client starts, sends to,
 	// restarts and reconfigures a chat through these, by chat id. The process
 	// is Go's to start — claude_start/claude_send are in remoteDenied.
-	"chat_send":                {Method: "ChatSend", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
-	"chat_restart":             {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"chat_clear":               {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"chat_sleep":               {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"ui_focus":                 {Method: "UiFocus", Args: []string{"window", "focused"}, Scope: scopeOrchOperate},
-	"seen_mark":                {Method: "SeenMark", Args: []string{"key"}, Scope: scopeOrchOperate},
-	"seen_mark_unread":         {Method: "SeenMarkUnread", Args: []string{"key"}, Scope: scopeOrchOperate},
-	"seen_list":                {Method: "SeenList", Args: []string{}, Scope: scopeOrchRead},
-	"chat_mark_active":         {Method: "ChatMarkActive", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"chat_snooze":              {Method: "ChatSnooze", Args: []string{"chatId", "untilMs"}, Scope: scopeOrchOperate},
-	"chat_link_pr":             {Method: "ChatLinkPr", Args: []string{"chatId", "ref"}, Scope: scopeOrchOperate},
-	"chat_unlink_pr":           {Method: "ChatUnlinkPr", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"chat_pr_refresh":          {Method: "ChatPrRefresh", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_send":             {Method: "ChatSend", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
+	"chat_submit":           {Method: "ChatSubmit", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
+	"chat_answer_turn":      {Method: "ChatAnswerTurn", Args: []string{"chatId", "picks", "extra", "images", "clientId"}, Scope: scopeOrchOperate},
+	"chat_restart":          {Method: "ChatRestart", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_clear":            {Method: "ChatClear", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_sleep":            {Method: "ChatSleep", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"ui_focus":              {Method: "UiFocus", Args: []string{"window", "focused"}, Scope: scopeOrchOperate},
+	"seen_mark":             {Method: "SeenMark", Args: []string{"key"}, Scope: scopeOrchOperate},
+	"seen_mark_unread":      {Method: "SeenMarkUnread", Args: []string{"key"}, Scope: scopeOrchOperate},
+	"seen_list":             {Method: "SeenList", Args: []string{}, Scope: scopeOrchRead},
+	"activity_append":       {Method: "ActivityAppend", Args: []string{"entries"}, Scope: scopeOrchOperate},
+	"chat_mark_active":      {Method: "ChatMarkActive", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_snooze":           {Method: "ChatSnooze", Args: []string{"chatId", "untilMs"}, Scope: scopeOrchOperate},
+	"chat_link_pr":          {Method: "ChatLinkPr", Args: []string{"chatId", "ref"}, Scope: scopeOrchOperate},
+	"chat_unlink_pr":        {Method: "ChatUnlinkPr", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_pr_refresh":       {Method: "ChatPrRefresh", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_loose_ends":       {Method: "ChatLooseEnds", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_net_dismiss":      {Method: "ChatNetDismiss", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_quiet_archivable": {Method: "ChatQuietArchivable", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_pins_list":        {Method: "ChatPinsList", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_press_action":     {Method: "ChatPressAction", Args: []string{"chatId", "msgIndex", "actionIndex"}, Scope: scopeOrchOperate},
+	"chat_action_presses":   {Method: "ChatActionPresses", Args: []string{"chatId"}, Scope: scopeOrchRead},
+	"chat_pin_remove":       {Method: "ChatPinRemove", Args: []string{"id"}, Scope: scopeOrchOperate},
+	// Runs the command stored on the card (never one sent here), once.
+	"chat_run_ask":             {Method: "ChatRunAsk", Args: []string{"chatId", "index"}, Scope: scopeOrchOperate},
 	"chat_prs_refresh":         {Method: "ChatPrsRefresh", Args: []string{"cwd"}, Scope: scopeOrchRead},
 	"chat_rewind":              {Method: "ChatRewind", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_fork":                {Method: "ChatFork", Args: []string{"chatId", "index", "text"}, Scope: scopeOrchOperate},
 	"chat_side_create":         {Method: "ChatSideCreate", Args: []string{"chatId"}, Scope: scopeOrchOperate},
 	"chat_interrupt":           {Method: "ChatInterrupt", Args: []string{"chatId"}, Scope: scopeOrchOperate},
-	"chat_steer":               {Method: "ChatSteer", Args: []string{"chatId", "text", "images"}, Scope: scopeOrchOperate},
+	"chat_warm":                {Method: "ChatWarm", Args: []string{"chatId"}, Scope: scopeOrchOperate},
+	"chat_steer":               {Method: "ChatSteer", Args: []string{"chatId", "text", "images", "clientId"}, Scope: scopeOrchOperate},
 	"chat_stop_task":           {Method: "ChatStopTask", Args: []string{"chatId", "taskId"}, Scope: scopeOrchOperate},
 	"chat_set_launch_settings": {Method: "ChatSetLaunchSettings", Args: []string{"chatId", "patch"}, Scope: scopeOrchOperate},
 	"spawn_subagent_chat": {Method: "SpawnSubagentChat", Args: []string{
@@ -518,6 +537,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"load_chat_messages":         {Method: "LoadChatMessages", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"load_chat_messages_page":    {Method: "LoadChatMessagesPage", Args: []string{"chatId", "before", "limit"}, Scope: scopeOrchRead},
 	"load_chat_image":            {Method: "LoadChatImage", Args: []string{"chatId", "index", "image"}, Scope: scopeOrchRead},
+	"chat_subscribe":             {Method: "ChatSubscribe", Args: []string{"chatId", "sinceRev"}, Scope: scopeOrchRead},
 	"save_chat_messages":         {Method: "SaveChatMessages", Args: []string{"chatId", "messages", "foldedOrd"}, Scope: scopeOrchOperate},
 	"chat_folded_ord":            {Method: "ChatFoldedOrd", Args: []string{"chatId"}, Scope: scopeOrchRead},
 	"load_chat_events_since":     {Method: "LoadChatEventsSince", Args: []string{"chatId", "since"}, Scope: scopeOrchRead},
@@ -555,6 +575,7 @@ var remoteAllowed = map[string]remoteCmd{
 	"remote_sync_chat":      {Method: "RemoteSyncChat", Args: []string{"chat"}, Scope: scopeOrchOperate},
 	"remote_list_chats":     {Method: "RemoteListChats", Args: nil, Scope: scopeOrchRead},
 	"remote_create_chat":    {Method: "RemoteCreateChat", Args: []string{"workspaceId", "agentKind", "model", "effort", "permissionMode"}, Scope: scopeOrchOperate},
+	"mini_chat":             {Method: "MiniChat", Args: []string{"fresh"}, Scope: scopeOrchOperate},
 	"remote_set_chat_title": {Method: "RemoteSetChatTitle", Args: []string{"id", "title", "expectTitle"}, Scope: scopeOrchOperate},
 
 	// The frontend's answer to a control:action event (controlapi.go's
@@ -611,6 +632,10 @@ var remoteDenied = map[string]string{
 	// The agent side of a secret request: only the local secret_request verb
 	// (control token) may park one; a remote client only answers.
 	"RequestSecret": "agents ask through the local secret_request verb; clients only answer (answer_secret_request)",
+	// The agent side of end_turn: only the calling chat says what its turn needs.
+	"SetTurnNeeds":     "agents set it through the local end_turn verb; clients read chats.turn_needs",
+	"TurnNeedsPending": "only a chat's Stop hook asks, through the local end_turn_pending verb",
+	"AddPin":           "agents pin through the local pin verb; clients list (chat_pins_list) and remove",
 	// Superseded by chat_send: a client building its own start payload is how
 	// three copies of it drifted apart (docs/plans/006-chat-runtime.md).
 	"ClaudeStart":    "a chat's process is the chat runtime's to start, from the row's launch settings — use chat_send",

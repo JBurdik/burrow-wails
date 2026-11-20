@@ -39,6 +39,9 @@ func (a *App) ScheduleListAll() ([]control.ScheduledPrompt, error) {
 }
 
 func (a *App) ScheduleSave(p control.ScheduledPrompt) (control.ScheduledPrompt, error) {
+	// A check is a command the app runs unattended: only the local schedule
+	// verb sets one, never a client (an edit keeps the stored one).
+	p.Check = ""
 	return scheduleAdapter{a}.save(p)
 }
 

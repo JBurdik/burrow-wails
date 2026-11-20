@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { effectScope, nextTick, shallowRef } from "vue";
 import { useTranscriptFeedback } from "@/composables/useTranscriptFeedback";
-import { insertQuote } from "@/lib/transcriptFeedback";
+import { EXPLAIN_MAX_QUOTE, explainPrompt, insertQuote } from "@/lib/transcriptFeedback";
 
 describe("transcript feedback", () => {
   beforeEach(() => {
@@ -83,5 +83,17 @@ describe("insertQuote", () => {
     const r = insertQuote("hi there", 2, "q");
     expect(r.text).toBe("hi\n> q\n\n there");
     expect(r.text.slice(0, r.caret)).toBe("hi\n> q\n");
+  });
+});
+
+describe("explainPrompt", () => {
+  it("quotes the words under a short request", () => {
+    const p = explainPrompt("  Ship the release notes\n\ntoday. ");
+    expect(p).toMatch(/^Explain .*Do not change any files/);
+    expect(p.endsWith("\n\n> Ship the release notes\n>\n> today.")).toBe(true);
+  });
+  it("caps a long selection", () => {
+    const p = explainPrompt("x".repeat(EXPLAIN_MAX_QUOTE + 500));
+    expect(p.endsWith(`> ${"x".repeat(EXPLAIN_MAX_QUOTE)}…`)).toBe(true);
   });
 });

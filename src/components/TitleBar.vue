@@ -104,9 +104,9 @@
 
     <!-- Main area: back · home · forward, then what's on screen. -->
     <div class="flex min-w-0 flex-1 items-center gap-1 pl-3" data-tauri-drag-region>
-      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Back" @click="router.back()"><PhCaretLeft :size="14" /></button>
+      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" :title="navTip.back" @mouseenter="refreshNavTips" @click="router.back()"><PhCaretLeft :size="14" /></button>
       <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="New thread" @click="ui.openWelcome()"><PhCircle :size="12" weight="bold" /></button>
-      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" title="Forward" @click="router.forward()"><PhCaretRight :size="14" /></button>
+      <button class="tb-btn tb-wide [-webkit-app-region:no-drag]" :title="navTip.forward" @mouseenter="refreshNavTips" @click="router.forward()"><PhCaretRight :size="14" /></button>
       <span class="ml-2 min-w-0 truncate text-[13.5px] font-medium text-foreground" data-tauri-drag-region>
         <span v-if="crumbProject" class="text-muted-foreground">{{ crumbProject }} / </span>{{ screenTitle }}
       </span>
@@ -202,6 +202,28 @@ import { useUIStore } from "@/stores/ui";
 import { releaseChannel } from "@/lib/releaseChannel";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
 import { router } from "@/router";
+
+// Back / Forward tooltips name where they go. history.state isn't reactive,
+// so it is read when the pointer reaches the button.
+const navTip = ref({ back: "Back", forward: "Forward" });
+function refreshNavTips() {
+  const st = router.options.history.state as { back?: string | null; forward?: string | null };
+  navTip.value = {
+    back: st.back ? `Back to ${routeLabel(st.back)}` : "Nothing to go back to",
+    forward: st.forward ? `Forward to ${routeLabel(st.forward)}` : "Nothing to go forward to",
+  };
+}
+function routeLabel(path: string): string {
+  const r = router.resolve(path);
+  const chatId = Number(r.query.chat);
+  if (chatId) return chats.sessions.find((c) => c.id === chatId)?.title ?? "thread";
+  const wsId = Number(r.params.wsId);
+  const tabId = Number(r.params.tabId);
+  if (tabId) return termTabs.tabsByWs[wsId]?.find((t) => t.id === tabId)?.title ?? "thread";
+  if (wsId) return wsStore.workspaces.find((w) => w.id === wsId)?.name ?? "project";
+  if (r.name === "dashboard") return "Dashboard";
+  return "New thread";
+}
 
 const props = defineProps<{ workspaceName?: string; folderPath?: string; rightPanelVisible?: boolean; sidebarVisible?: boolean; detailsOpen?: boolean }>();
 defineEmits(["back", "toggle-rightpanel", "toggle-sidebar", "toggle-details", "toggle-bottom"]);

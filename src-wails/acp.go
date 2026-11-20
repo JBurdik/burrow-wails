@@ -692,7 +692,11 @@ func (a *App) applyChatPhase(chatID string, event agentphase.Event) {
 		if (event.Kind == agentphase.HookDone || event.Kind == agentphase.HookError) && a.phases.Get(key).State == agentphase.Idle {
 			return
 		}
+		wasInFlight := a.phases.Get(key).InFlight()
 		a.phases.Apply(key, event)
+		if !wasInFlight && a.phases.Get(key).InFlight() {
+			a.clearTurnNeeds(chatID) // a new turn: the last one's end_turn is answered or moot
+		}
 	}
 	if event.Kind == agentphase.Interrupt {
 		go func() { _, _ = a.SettleTurnAudit("chat:"+chatID, string(event.Kind)) }()
@@ -1194,7 +1198,7 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 			return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 		}
 		a.applyChatPhase(id, agentphase.Event{Kind: agentphase.HookRunning})
-		a.emitChatLine(id, chatUserKind, text)
+		a.recordSentUserLine(id, text, images)
 		return rpc, nil
 	}
 
@@ -1223,7 +1227,7 @@ func (a *App) AcpSend(id, text string, images []string) (int64, error) {
 		sess.mu.Unlock()
 		return rpc, fmt.Errorf("send to sub-agent %s: %w (its process is not running — start it before sending)", id, err)
 	}
-	a.emitChatLine(id, chatUserKind, text)
+	a.recordSentUserLine(id, text, images)
 	return rpc, nil
 }
 

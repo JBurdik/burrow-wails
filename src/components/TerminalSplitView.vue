@@ -86,6 +86,14 @@ export interface Leaf {
   busy: boolean;
   status: import("@/lib/terminalStatus").TermStatus;
   initialCmd?: string;
+  /** The initial command was typed into the PTY. A remount (the view was
+   *  unmounted while hidden, plan 010) must not type it again; initialCmd itself
+   *  stays — the tab's agent icon and `claude --resume` on restore read it. */
+  cmdSent?: boolean;
+  /** The daemon holds this leaf's PTY. Until then its XTerm must stay mounted —
+   *  mounting is what spawns the shell (create_pty). Set for restored / adopted
+   *  leaves whose PTY is already alive. */
+  ptyReady?: boolean;
   cwd?: string;          // per-tab cwd override (else workspace cwd)
   resultToken?: string;  // set on tabs spawned via `burrow spawn --token`
   leafType?: "terminal" | "diff" | "editor" | "chat" | "browser" | "git";  // default "terminal"

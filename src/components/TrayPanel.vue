@@ -25,6 +25,8 @@
     <!-- Thread list -->
     <template v-if="view.kind === 'list'">
       <div ref="list" class="min-h-0 overflow-y-auto px-1.5 pb-1.5" :class="fill ? 'flex-1' : 'shrink'">
+        <!-- Open questions from every thread, answerable right here. -->
+        <DecisionsList @open="(s) => (view = { kind: 'chat', chatId: s.id })" />
         <p v-if="!rows.length" class="px-2 py-8 text-center text-[12px] text-muted-foreground">No active threads.</p>
         <template v-for="group in groups" :key="group.label">
           <template v-if="group.rows.length">
@@ -56,7 +58,7 @@
               >
                 <PhArrowBendUpLeft :size="14" />
               </button>
-              <!-- Quick reply: queued in Go (chat_queue_add), delivered once the turn settles. -->
+              <!-- Quick reply: chat_submit — Go sends it now or queues it behind the running turn. -->
               <div v-if="replyTo === row.id" class="mx-2 mb-1.5 ml-[34px] flex items-center gap-1.5">
                 <input
                   ref="replyEl"
@@ -113,6 +115,9 @@
         <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground" @click="startCompose">
           <PhPlus :size="13" /> New thread
         </button>
+        <button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground" @click="openMiniChat()">
+          <PhChatCircle :size="13" /> Mini chat
+        </button>
         <button type="button" class="rounded-lg px-2 py-1 text-[12px] text-secondary-foreground transition-colors hover:bg-hover hover:text-foreground" @click="open('')">Open Burrow</button>
       </div>
     </template>
@@ -166,11 +171,12 @@ import { PhArrowBendUpLeft, PhArrowSquareOut, PhCaretLeft, PhChatCircle, PhPlus,
 import { TrayOpen, TraySetPinned } from "@/lib/wailsCompat/bindings/burrow/desktopservice";
 import type { TermStatus } from "@/lib/terminalStatus";
 import { useClaudeChatsStore } from "@/stores/claudeChats";
+import DecisionsList from "@/components/DecisionsList.vue";
+import { openMiniChat } from "@/lib/miniChat";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Select } from "@/components/ui/select";
-import { chatSession, TRANSCRIPT_PAGE, type ChatMessagesPage, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
-import { useUIStore } from "@/stores/ui";
-import { smartTitle } from "@/lib/chatTitle";
+import { chatSession, type ChatSession, type PendingAnswer, type PendingRequest } from "@/lib/chatSession";
+import { newClientId } from "@/lib/offline";
 import { feedGroups, needsYou, permTarget, useThreadFeed, type FeedRow } from "@/lib/threadFeed";
 
 const AgentChat = defineAsyncComponent(() => import("@/components/AgentChat.vue"));
@@ -179,7 +185,6 @@ type View = { kind: "list" } | { kind: "chat"; chatId: number } | { kind: "compo
 
 const chats = useClaudeChatsStore();
 const workspaces = useWorkspaceStore();
-const ui = useUIStore();
 const { rows, perms, now, answerPerm: answer, permsFor } = useThreadFeed();
 const view = ref<View>({ kind: "list" });
 const pinned = ref(false);
@@ -255,10 +260,8 @@ function textClass(status: TermStatus): string {
 // holds that session — the same one a mounted AgentChat would use — so an
 // answer goes through respond(): same "Always" rules, same transcript row.
 //
-// LOAD-BEARING: the session must hold the transcript before it can answer.
-// respond() appends a row and save() replaces the whole stored transcript, so
-// an empty, unhydrated session would wipe the chat's history. A failed or
-// empty read ⇒ no inline answer, the row only opens the thread.
+// The session reads Go's transcript first, for the inline view. A failed read
+// ⇒ no inline answer, the row only opens the thread.
 const held = new Map<number, ChatSession>();
 const answerable = ref(new Set<number>());
 async function holdSession(chatId: number) {
@@ -266,12 +269,8 @@ async function holdSession(chatId: number) {
   const S = chatSession(chatId);
   S.retain();
   held.set(chatId, S);
-  if (S.messages.value.length === 0) {
-    const page = await invoke<ChatMessagesPage>("load_chat_messages_page", { chatId, before: -1, limit: TRANSCRIPT_PAGE }).catch(() => null);
-    if (!held.has(chatId)) return; // released while loading
-    if (!page || !Array.isArray(page.messages) || (page.messages.length === 0 && page.start === 0)) return;
-    if (S.messages.value.length === 0) S.hydrate({ messages: page.messages, hiddenBefore: page.start });
-  }
+  const ok = await S.loadTranscript();
+  if (!held.has(chatId) || !ok) return; // released while loading, or unreadable
   await S.listenClaude();
   await S.listenAcp();
   await S.recoverPendingRequests();
@@ -314,9 +313,8 @@ async function sendReply(row: FeedRow) {
   if (!text) return;
   replyText.value = "";
   replyTo.value = null;
-  // Always the queue: a running turn gets it when it settles, a settled chat
-  // within ~300 ms (chatdelivery.go kicks a pass on every add).
-  await invoke("chat_queue_add", { chatId: row.id, text, images: [] }).catch(() => {});
+  // Go decides: a running turn gets it when it settles, a settled chat now.
+  await invoke("chat_submit", { chatId: row.id, text, images: [], clientId: newClientId() }).catch(() => {});
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────────
@@ -364,8 +362,7 @@ async function sendCompose() {
       workspaceId: Number(composeWs.value), agentKind: "claude", model: "", effort: "", permissionMode: "",
     });
     await chats.reload();
-    await invoke("chat_send", { chatId: row.id, text, images: [] });
-    nameThread(row.id, Number(composeWs.value), text);
+    await invoke("chat_submit", { chatId: row.id, text, images: [], clientId: newClientId() });
     composeText.value = "";
     view.value = { kind: "chat", chatId: row.id };
   } catch (e) {
@@ -373,20 +370,6 @@ async function sendCompose() {
   } finally {
     composing.value = false;
   }
-}
-
-// remote_create_chat titles the row "Chat N (phone)"; give it the welcome
-// composer's titles instead: the prompt heuristic now, a model's when it answers.
-function nameThread(chatId: number, wsId: number, text: string) {
-  const heuristic = smartTitle(text);
-  chats.sync(chatId, { title: heuristic });
-  const cwd = workspaces.workspaces.find((w) => w.id === wsId)?.path ?? "";
-  void invoke<string>("generate_chat_title", { cwd, model: ui.textGenerationModel, policy: ui.textGenerationPolicy, text })
-    .then((title) => {
-      const s = chats.sessions.find((c) => c.id === chatId);
-      if (title && s && !s.pinnedTitle && s.title === heuristic) chats.sync(chatId, { title });
-    })
-    .catch(() => {});
 }
 
 // ── Pinning + window size ───────────────────────────────────────────────────

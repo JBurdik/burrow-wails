@@ -72,7 +72,7 @@
   <h2>Transports</h2>
   <table>
     <tr><th>Transport</th><th>Client</th><th>Auth</th><th>Verbs</th></tr>
-    <tr><td>loopback <code>POST /v1/&lt;verb&gt;</code></td><td><code>burrow</code> CLI (curl), <code>burrow-mcp</code></td><td><code>control.token</code></td><td>all</td></tr>
+    <tr><td>loopback <code>POST /v1/&lt;verb&gt;</code></td><td><code>burrow</code> CLI (curl), <code>burrow-mcp</code></td><td>challenge-response over <code>control.token</code> / a caller key</td><td>all</td></tr>
     <tr><td>tailnet HTTP</td><td>mobile / PWA</td><td><code>http.token</code> + pairing code</td><td><code>ScopeRemote</code> only</td></tr>
     <tr><td>Wails bindings</td><td>the desktop UI</td><td>in-process</td><td>as needed</td></tr>
   </table>
@@ -81,6 +81,17 @@
     (<code>$BURROW_HOME_DIR/hook.port</code>) and one token file (<code>control.token</code>, mode 0600). Loopback is
     reachable by <em>every</em> process on the machine and <code>spawn</code> starts programs, hence the token — and it
     fails closed if the token could not be persisted.
+  </p>
+  <p>
+    The token never travels. A client fetches a single-use nonce (<code>POST /v1/_challenge</code>), sends
+    <code>Authorization: Burrow-Proof &lt;server nonce&gt; &lt;client nonce&gt; &lt;HMAC-SHA256&gt; [chat:&lt;id&gt;|pty:&lt;id&gt;]</code>
+    over <code>"burrow-ctl-v1 client\n" + sn + "\n" + cn + "\n" + port</code>, and trusts the reply only when its
+    <code>X-Burrow-Proof</code> is the same HMAC with <code>server</code>. Something holding the port while Burrow is down
+    learns nothing. A chat or tab signs with its own <code>BURROW_CALLER_TOKEN</code> (HMAC of the token and
+    <code>caller:chat:&lt;id&gt;</code> / <code>caller:pty:&lt;id&gt;</code>); that key, not <code>BURROW_CHAT_ID</code>, is
+    who the call is from. A chat below full access can't use Burrow to widen itself: no freer sub-agents, no detached
+    spawns, no new-chat or check schedules, no messaging / moving a chat that runs freer, no other thread's sub-agents —
+    the refusal tells the agent to ask the user. <code>Authorization: Bearer</code> still works until 2027-01-31.
   </p>
   <div class="warn">
     <strong>Scope is opt-in.</strong> A verb is local-only unless it declares <code>ScopeRemote</code>. A phone can list
@@ -148,7 +159,10 @@
     <tr><td>schedule_pause / schedule_resume / schedule_run_now</td><td>Pause keeps the rule but skips runs; resume moves a recurring item past the slots missed meanwhile; run-now makes it due immediately (still held until the chat settles).</td></tr>
     <tr><td>move_to_worktree</td><td>Re-home a chat in a worktree of its repo — an existing worktree on <code>branch</code> is reused, else <code>create_worktree</code>'s machinery makes one. Updates <code>chats.workspace_id</code>/<code>branch</code> (both now read-only to <code>SaveChats</code>, or a client's save-per-message would move it back). The live process is replaced on the first send after the turn settles, never mid-turn (the caller is usually that turn). Claude: the session file is symlinked into the new cwd's <code>projects/&lt;slug&gt;/</code> (claude 2.1.311 resumes across cwds on its own; older CLIs and a different <code>CLAUDE_CONFIG_DIR</code> don't). Codex: <code>thread/resume</code> takes the new cwd. Generic ACP: refused.</td></tr>
     <tr><td>leave_worktree</td><td>Move the chat back to the worktree's parent repo. The worktree stays (<code>worktree_remove</code> deletes it).</td></tr>
+    <tr><td>activity</td><td><code>burrow activity [--summary] [--days N]</code> — the user's activity log (<code>&lt;app-data&gt;/activity/YYYY-MM-DD.jsonl</code>, 30 days): clicks, routes, shortcuts, sends and answers while Settings → General → Keep an activity log is on (never typed text), plus UI hangs ≥ 1 s always. Last 500 entries, or with <code>--summary</code> counts by kind + label, most used first. Local only.</td></tr>
     <tr><td>secret_request</td><td><code>burrow secret-request --name NAME --reason TEXT</code> — blocks (≤ 15 min) until the user answers a card in the chat / above the tab (desktop, tray panel or phone) and returns <code>{path, name}</code>: a 0600 file under <code>&lt;app-data&gt;/secrets/turn</code>, deleted when the caller's turn ends (≤ 30 min, and on restart). The value is never in the result, the bus, the transcript or SQLite. Decline = an error. Caller = <code>BURROW_CHAT_ID</code>, else <code>BURROW_PTY_ID</code>. Local only; clients answer with <code>answer_secret_request</code> / <code>decline_secret_request</code>.</td></tr>
+    <tr><td>end_turn</td><td><code>burrow end-turn --needs you --asks '[{"question":"Ship?","options":["Yes","No"],"suggested":0}]'</code> (an MCP tool with a real array schema) — the chat's last act in a turn: <code>needs</code> <code>you</code> | <code>nothing</code> (left out = follows <code>asks</code>), <code>asks</code> (≤ 6, each ≤ 6 options, one option = free text) and on a done turn <code>next</code> (≤ 3 follow-ups). Stored as <code>chats.turn_needs</code> (read-only on the wire), cleared when the next turn starts; AgentChat draws a Needs-you card (answer buttons) or a Done card (Archive, follow-ups, and the loose ends from <code>chat_loose_ends</code>). An ask's <code>run</code> (no hidden characters, ≤ 8000) is a command that is the user's to run: Run on the card executes the stored command once in the chat's folder (no stdin, 10 min) and queues its output back as the user's reply (<code>chat_run_ask</code>). Chats only (<code>BURROW_CHAT_ID</code>); local only. A Claude chat's Stop hook (<code>burrow end-turn-gate</code>, asking the internal <code>end_turn_pending</code>) sends a turn that skipped it back once.</td></tr>
+    <tr><td>pin</td><td><code>burrow pin --target PATH|URL --note TEXT</code> — pins something the user should look at to the calling chat's Highlights panel (Right Panel). A relative path resolves against the caller's cwd; re-pinning a target updates its note; ≤ 20 per chat. Chats only; local only.</td></tr>
   </table>
 
   <h3>Repo, worktrees, pull requests</h3>
@@ -256,6 +270,7 @@
     <tr><td>BURROW_SESSION_DIR</td><td>Where result files live (<code>&lt;token&gt;.result</code>, <code>.done</code>).</td></tr>
     <tr><td>BURROW_CWD</td><td>The workspace dir this shell belongs to — every verb's default <code>cwd</code>.</td></tr>
     <tr><td>BURROW_PTY_ID</td><td>This tab's pty id. Set in PTYs only; its absence is what makes the global status hooks a no-op outside Burrow (and in chats, which are not tabs).</td></tr>
+    <tr><td>BURROW_CALLER_TOKEN</td><td>This chat's / tab's own control key (see Auth above); the CLI and <code>burrow-mcp</code> sign with it instead of <code>control.token</code>.</td></tr>
     <tr><td>BURROW_HOOK_PORT</td><td>Port baked in at PTY creation; the <code>hook.port</code> file wins when they disagree.</td></tr>
     <tr><td>BURROW_CHAT_ID</td><td>Set only inside a chat session (Claude/ACP), never a plain PTY. <code>bin/burrow</code> sends it as <code>parent_chat_id</code> on every verb call, and <code>burrow-mcp</code> injects it the same way into every MCP tool call whose caller didn't already supply one — this is what lets <code>spawn</code> attribute a new sub-agent to the chat that asked for it without the agent naming its own chat id. The server never trusts a request's own <code>caller_is_subagent</code> field; it recomputes it itself by looking up whether <code>parent_chat_id</code> already has a parent, so a sub-agent's own transcript can't talk it into spawning a grandchild by sending <code>"caller_is_subagent":false</code>.</td></tr>
   </table>

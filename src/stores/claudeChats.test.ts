@@ -11,11 +11,10 @@
  * ages onto the settled shelf.
  */
 import { describe, it, expect } from "vitest";
-import { AUTO_SETTLE_AFTER_DAYS, settledFor, isActivitySync } from "./claudeChats";
+import { settledFor, isActivitySync } from "./claudeChats";
 import type { ClaudeSession } from "./claudeChats";
 import { childrenOf, topLevel, allChildrenOf } from "./chatTree";
 
-const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
 
 const chat = (over: Partial<ClaudeSession> = {}): ClaudeSession =>
@@ -32,42 +31,29 @@ const chat = (over: Partial<ClaudeSession> = {}): ClaudeSession =>
     ...over,
   }) as ClaudeSession;
 
+// The rule itself is Go's (src-wails/chatattention_test.go has the ported
+// cases); the client only compares settledSince with its clock and gates on
+// work in flight.
 describe("settledFor", () => {
-  it("keeps a freshly created empty chat in the active list", () => {
-    // The phone's case: no session id, no messages, created seconds ago. This
-    // is the one that was invisible.
-    expect(settledFor(chat({ lastActivityAt: NOW - 1_000 }), NOW)).toBe(false);
+  it("is settled from settledSince on, never before", () => {
+    expect(settledFor(chat({ settledSince: NOW }), NOW)).toBe(true);
+    expect(settledFor(chat({ settledSince: NOW + 1 }), NOW)).toBe(false);
+    expect(settledFor(chat({ settledSince: 1 }), NOW)).toBe(true);
   });
 
-  it("settles an untouched chat once it is old enough", () => {
-    expect(settledFor(chat({ lastActivityAt: NOW - AUTO_SETTLE_AFTER_DAYS * DAY }), NOW)).toBe(true);
-    expect(settledFor(chat({ lastActivityAt: NOW - (AUTO_SETTLE_AFTER_DAYS * DAY - 1) }), NOW)).toBe(false);
+  it("is not settled when Go says never (0) or nothing yet", () => {
+    expect(settledFor(chat({ settledSince: 0 }), NOW)).toBe(false);
+    expect(settledFor(chat({ settledSince: undefined }), NOW)).toBe(false);
   });
 
-  it("settles a chat that has no timestamp at all", () => {
-    // Rows migrated from older builds carry lastActivityAt 0. Treating the
-    // missing value as "epoch" is what puts them on the shelf instead of at
-    // the top of the list.
-    expect(settledFor(chat({ lastActivityAt: 0 }), NOW)).toBe(true);
-    expect(settledFor(chat({ lastActivityAt: undefined }), NOW)).toBe(true);
-  });
-
-  it("never settles a chat with work pending, however old", () => {
-    const ancient = { lastActivityAt: 0 };
+  it("never settles a chat with work pending", () => {
     for (const status of ["running", "waiting", "permission"] as const) {
-      expect(settledFor(chat({ ...ancient, status }), NOW)).toBe(false);
+      expect(settledFor(chat({ settledSince: 1, status }), NOW)).toBe(false);
     }
-    expect(settledFor(chat({ ...ancient, busy: true }), NOW)).toBe(false);
-  });
-
-  it("lets a manual pin win over the clock in both directions", () => {
-    expect(settledFor(chat({ lastActivityAt: NOW, settledOverride: "settled" }), NOW)).toBe(true);
-    expect(settledFor(chat({ lastActivityAt: 0, settledOverride: "active" }), NOW)).toBe(false);
+    expect(settledFor(chat({ settledSince: 1, busy: true }), NOW)).toBe(false);
   });
 
   it("does not settle a chat that does not exist", () => {
-    // Callers look a session up by id and may miss; `undefined` must not read
-    // as "settled" and hide a row whose data simply has not arrived yet.
     expect(settledFor(undefined, NOW)).toBe(false);
   });
 });

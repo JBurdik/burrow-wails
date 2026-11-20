@@ -51,6 +51,7 @@ type ChatQueueItem struct {
 	Attachments []string `json:"attachments"`
 	CreatedAt   int64    `json:"createdAt"`
 	Attempts    int      `json:"attempts"`
+	ClientID    string   `json:"clientId,omitempty"`
 }
 
 type chatQueueChanged struct {
@@ -61,7 +62,7 @@ type chatQueueChanged struct {
 func scanQueueItem(row interface{ Scan(...any) error }) (ChatQueueItem, error) {
 	var it ChatQueueItem
 	var att string
-	if err := row.Scan(&it.ID, &it.ChatID, &it.Ord, &it.Text, &att, &it.CreatedAt, &it.Attempts); err != nil {
+	if err := row.Scan(&it.ID, &it.ChatID, &it.Ord, &it.Text, &att, &it.CreatedAt, &it.Attempts, &it.ClientID); err != nil {
 		return it, err
 	}
 	if json.Unmarshal([]byte(att), &it.Attachments) != nil || it.Attachments == nil {
@@ -70,7 +71,7 @@ func scanQueueItem(row interface{ Scan(...any) error }) (ChatQueueItem, error) {
 	return it, nil
 }
 
-const chatQueueColumns = `id, chat_id, ord, text, attachments, created_at, attempts`
+const chatQueueColumns = `id, chat_id, ord, text, attachments, created_at, attempts, client_id`
 
 // ChatQueueList is the chat's queue, head first.
 func (a *App) ChatQueueList(chatID int64) ([]ChatQueueItem, error) {
@@ -103,30 +104,45 @@ func (a *App) emitQueueChanged(chatID int64) {
 
 // ChatQueueAdd appends a follow-up at the tail. A chat that has already
 // settled (the client thought it busy, the turn ended meanwhile) is drained
-// right away instead of on the next sweep.
-func (a *App) ChatQueueAdd(chatID int64, text string, images []string) (ChatQueueItem, error) {
+// right away instead of on the next sweep. A non-empty clientID already
+// accepted for this chat (by this or chat_send) returns the earlier item
+// without inserting (chatclientid.go).
+func (a *App) ChatQueueAdd(chatID int64, text string, images []string, clientID string) (ChatQueueItem, error) {
 	if _, err := a.chatByID(chatID); err != nil {
 		return ChatQueueItem{}, err
 	}
+	prev, finish, dup := a.claimClientID(chatID, clientID)
+	if dup {
+		if prev.item != nil {
+			return *prev.item, nil
+		}
+		return ChatQueueItem{ChatID: chatID, Text: text, Attachments: []string{}, ClientID: clientID}, nil
+	}
+	it, err := a.chatQueueInsert(chatID, text, images, clientID)
+	if err != nil {
+		finish(false, nil)
+		return ChatQueueItem{}, err
+	}
+	finish(true, &it)
+	a.emitQueueChanged(chatID)
+	a.kickChatDelivery()
+	return it, nil
+}
+
+func (a *App) chatQueueInsert(chatID int64, text string, images []string, clientID string) (ChatQueueItem, error) {
 	if images == nil {
 		images = []string{}
 	}
 	att, _ := json.Marshal(images)
 	now := time.Now().UnixMilli()
-	res, err := a.db.Exec(`INSERT INTO chat_queue (chat_id, ord, text, attachments, created_at)
-		VALUES (?, (SELECT COALESCE(MAX(ord), -1) + 1 FROM chat_queue WHERE chat_id = ?), ?, ?, ?)`,
-		chatID, chatID, text, string(att), now)
+	res, err := a.db.Exec(`INSERT INTO chat_queue (chat_id, ord, text, attachments, created_at, client_id)
+		VALUES (?, (SELECT COALESCE(MAX(ord), -1) + 1 FROM chat_queue WHERE chat_id = ?), ?, ?, ?, ?)`,
+		chatID, chatID, text, string(att), now, clientID)
 	if err != nil {
 		return ChatQueueItem{}, err
 	}
 	id, _ := res.LastInsertId()
-	it, err := scanQueueItem(a.db.QueryRow(`SELECT `+chatQueueColumns+` FROM chat_queue WHERE id = ?`, id))
-	if err != nil {
-		return ChatQueueItem{}, err
-	}
-	a.emitQueueChanged(chatID)
-	a.kickChatDelivery()
-	return it, nil
+	return scanQueueItem(a.db.QueryRow(`SELECT `+chatQueueColumns+` FROM chat_queue WHERE id = ?`, id))
 }
 
 var errNotQueued = errors.New("not in the queue (already sent or removed)")
@@ -221,9 +237,9 @@ func (a *App) claimQueueItem(id int64) (ChatQueueItem, bool) {
 // requeueHead puts a claimed item back in front of the queue under its old id.
 func (a *App) requeueHead(it ChatQueueItem, attempts int) {
 	att, _ := json.Marshal(it.Attachments)
-	if _, err := a.db.Exec(`INSERT INTO chat_queue (id, chat_id, ord, text, attachments, created_at, attempts)
-		VALUES (?, ?, (SELECT COALESCE(MIN(ord), 1) - 1 FROM chat_queue WHERE chat_id = ?), ?, ?, ?, ?)`,
-		it.ID, it.ChatID, it.ChatID, it.Text, string(att), it.CreatedAt, attempts); err != nil {
+	if _, err := a.db.Exec(`INSERT INTO chat_queue (id, chat_id, ord, text, attachments, created_at, attempts, client_id)
+		VALUES (?, ?, (SELECT COALESCE(MIN(ord), 1) - 1 FROM chat_queue WHERE chat_id = ?), ?, ?, ?, ?, ?)`,
+		it.ID, it.ChatID, it.ChatID, it.Text, string(att), it.CreatedAt, attempts, it.ClientID); err != nil {
 		log.Printf("chat %d: requeue of queued message %d failed: %v", it.ChatID, it.ID, err)
 	}
 }
@@ -264,7 +280,7 @@ func (a *App) queueDeliveries(send chatSender, delivered *[]int64) []pendingDeli
 					return false // removed / steered meanwhile
 				}
 				a.emitQueueChanged(it.ChatID)
-				if err := send(it.ChatID, it.Text, it.Attachments); err != nil {
+				if err := send(it.ChatID, it.Text, it.Attachments, it.ClientID, nil); err != nil {
 					busy := errors.Is(err, errChatBusy)
 					attempts := it.Attempts
 					if !busy {

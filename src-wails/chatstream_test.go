@@ -325,3 +325,24 @@ func TestAnsweredChatRequestIsResolvedEverywhere(t *testing.T) {
 		t.Fatalf("want request.resolved 9, got %+v", ev)
 	}
 }
+
+// A resolved Codex/ACP request must not come back while the chat still waits
+// on another one (Go's own loader is what recovers cards after a reconnect).
+func TestResolvedAcpRequestIsNotRecovered(t *testing.T) {
+	a := newTestApp(t)
+	store, err := NewPhaseStore(a.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.phases = store
+	const id = "79"
+	a.emitChatLine(id, "acp-req", `{"jsonrpc":"2.0","id":7,"method":"item/commandExecution/requestApproval","params":{}}`)
+	a.emitChatLine(id, "acp-data", acpAnsweredLine(7))
+	a.emitChatLine(id, "acp-req", `{"jsonrpc":"2.0","id":8,"method":"item/tool/requestUserInput","params":{}}`)
+	store.Apply("chat:"+id, agentphase.Event{Kind: agentphase.HookWaiting})
+	drainChatStream(t, a, id)
+	got, err := a.LoadPendingChatRequests(id)
+	if err != nil || len(got) != 1 || !strings.Contains(got[0].Line, `"id":8`) {
+		t.Fatalf("want only the open request 8: %+v %v", got, err)
+	}
+}

@@ -8,7 +8,7 @@ vi.mock("@/lib/config", () => ({
 
 const {
   getAcpCapabilities, getAcpChatSetting, getLastAcpSetting,
-  setAcpCapabilities, setAcpChatSetting, setLastAcpSetting,
+  setAcpCapabilities, setAcpChatSetting, setLastAcpSetting, rpcLaunchSeed,
 } = await import("./acpSettings");
 
 beforeEach(() => { for (const key of Object.keys(store)) delete store[key]; });
@@ -46,5 +46,31 @@ describe("ACP composer settings", () => {
 
     expect(getAcpCapabilities(12, "codex")?.configOptions[0].currentValue).toBe("high");
     expect(getAcpCapabilities(12, "gemini")).toBeUndefined();
+  });
+});
+
+describe("rpcLaunchSeed", () => {
+  it("pins the welcome's Codex picks on a fresh row", () => {
+    setLastAcpSetting("codex", "model", "gpt-6-luna");
+    setLastAcpSetting("codex", "effort", "high");
+    setLastAcpSetting("codex", "mode", "supervised");
+    expect(rpcLaunchSeed({}, "codex", true, "claude-opus-5-5")).toEqual({
+      row_only: true, model: "gpt-6-luna", effort: "high", permission_mode: "supervised",
+    });
+  });
+
+  it("falls back to the caller's model when nothing was picked", () => {
+    expect(rpcLaunchSeed({}, "codex", true, "gpt-6-sol")).toEqual({ row_only: true, model: "gpt-6-sol" });
+  });
+
+  it("leaves a resumed chat and a filled row alone", () => {
+    setLastAcpSetting("codex", "model", "gpt-6-luna");
+    expect(rpcLaunchSeed({ claudeSessionId: "thr_1" }, "codex", true)).toBeNull();
+    expect(rpcLaunchSeed({ model: "gpt-6-sol" }, "codex", true)).toBeNull();
+  });
+
+  it("never seeds a generic ACP mode (a stale one would refuse the start)", () => {
+    setLastAcpSetting("gemini", "mode", "yolo");
+    expect(rpcLaunchSeed({}, "gemini", false)).toBeNull();
   });
 });

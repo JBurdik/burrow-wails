@@ -77,8 +77,13 @@ type ProviderRuntimeEvent struct {
 	// (chatProjection.ts, the mobile reducer) must be unaffected by their
 	// presence.
 	Role   string   `json:"role,omitempty"`   // message.note: the ChatMessage role to render
-	Images []string `json:"images,omitempty"` // message.note / message.patch_user
-	TurnMs int      `json:"turnMs,omitempty"` // message.patch_user
+	Images []string `json:"images,omitempty"` // message.note / message.patch_user / user.delta
+	// user.delta: the client id the submitting client gave the message
+	// (chatsubmit.go) — how its echo finds this row.
+	ClientID string `json:"clientId,omitempty"`
+	// user.delta: Go sent the prompt on its own (userLine.Auto)
+	Auto   *autoSend `json:"auto,omitempty"`
+	TurnMs int       `json:"turnMs,omitempty"` // message.patch_user
 	// message.note "spawned sub-agent" row: which child chat it opens.
 	SubagentChatID int64  `json:"subagentChatId,omitempty"`
 	SubagentAgent  string `json:"subagentAgent,omitempty"`
@@ -651,11 +656,11 @@ const chatUserKind = "chat-user"
 // normalizeUserPrompt turns a recorded prompt into the neutral event both
 // clients already know how to render.
 //
-// The line is the prompt text verbatim, not JSON: it is the one stream kind
-// this app authors rather than parses, so there is no provider envelope to
-// preserve and nothing to lose by storing what the person actually typed.
+// The line is JSON {text, images, clientId} (encodeUserLine); older lines are
+// the prompt text verbatim, and decodeUserLine reads both.
 func normalizeUserPrompt(line string, ord int64) []ProviderRuntimeEvent {
-	if line == "" {
+	u := decodeUserLine(line)
+	if u.Text == "" {
 		return nil
 	}
 	// Identified by the stream ORD, not by a hash of the text: two identical
@@ -671,7 +676,10 @@ func normalizeUserPrompt(line string, ord int64) []ProviderRuntimeEvent {
 	return []ProviderRuntimeEvent{{
 		Type:      EvtUserDelta,
 		MessageID: fmt.Sprintf("acp:user:%d", ord),
-		Text:      line,
+		Text:      u.Text,
+		Images:    u.Images,
+		ClientID:  u.ClientID,
+		Auto:      u.Auto,
 	}}
 }
 

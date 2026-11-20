@@ -79,6 +79,7 @@ func main() {
 	})
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		app.restoreWindowState(mainWin)
+		fixAXSize(mainWin)
 	})
 
 	go watchUIBinary()
@@ -145,6 +146,7 @@ func appMenu() *application.Menu {
 	wm.AddRole(application.Minimise)
 	wm.AddRole(application.Zoom)
 	wm.AddSeparator()
+	wm.Add("Mini Chat").SetAccelerator("CmdOrCtrl+Alt+M").OnClick(func(*application.Context) { desktopEmit("menu-mini-chat") })
 	wm.Add("Keep on Top").SetAccelerator("CmdOrCtrl+Alt+T").OnClick(func(*application.Context) { toggleKeepOnTop() })
 	help := m.AddSubmenu("Help")
 	for _, it := range []struct{ label, event string }{
