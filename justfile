@@ -364,8 +364,50 @@ release level="patch":
         "$DMG" "{{tarball}}" src-wails/build/bin/latest.json \
         --repo "{{repo}}" --title "$TAG" --notes "$NOTES" --latest
 
+    just brew-cask "$NEW" "$DMG" || echo "⚠️  Homebrew cask not updated — rerun: just brew-cask $NEW"
+
     echo "✅ released $TAG → https://github.com/{{repo}}/releases/tag/$TAG"
     echo "   in-app updater will pick it up on the next check."
+
+# Write Casks/burrow-ide.rb in the Homebrew tap for a published release (no clone:
+# GitHub contents API). Without a local dmg it downloads the release's one for the sha.
+# Install: brew install --cask jburdik/tap/burrow-ide
+brew-cask ver=version dmg_path="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TAP="JBurdik/homebrew-tap"; FILE="Casks/burrow-ide.rb"
+    DMG="{{dmg_path}}"
+    if [ -z "$DMG" ]; then
+        TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+        gh release download "v{{ver}}" --repo "{{repo}}" --pattern "Burrow_{{ver}}_aarch64.dmg" --dir "$TMP"
+        DMG="$TMP/Burrow_{{ver}}_aarch64.dmg"
+    fi
+    SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+    BODY="$(cat <<EOF
+    cask "burrow-ide" do
+      version "{{ver}}"
+      sha256 "$SHA"
+
+      url "https://github.com/{{repo}}/releases/download/v#{version}/Burrow_#{version}_aarch64.dmg"
+      name "Burrow"
+      desc "Multi-workspace IDE shell for running AI coding agents side by side"
+      homepage "https://github.com/{{repo}}"
+
+      # The app updates itself (src-wails/updater.go); brew must not fight it.
+      auto_updates true
+      depends_on arch: :arm64
+      depends_on macos: ">= :monterey"
+
+      app "Burrow.app"
+    end
+    EOF
+    )"
+    OLD_SHA="$(gh api "repos/$TAP/contents/$FILE" --jq .sha 2>/dev/null || true)"
+    gh api -X PUT "repos/$TAP/contents/$FILE" \
+        -f message="burrow-ide {{ver}}" \
+        -f content="$(printf '%s\n' "$BODY" | sed 's/^    //' | base64)" \
+        ${OLD_SHA:+-f sha="$OLD_SHA"} --jq .commit.html_url
+    echo "🍺 cask burrow-ide {{ver}} → $TAP"
 
 # ── verification ──────────────────────────────────────────────────────────────
 
