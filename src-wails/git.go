@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,7 +121,17 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	// suppress one harmless, idempotent extra event isn't worth the coupling
 	// — a client that reloads on the premature emit and reloads again on the
 	// correct one ends up in the same place either way.
-	ws, err := a.CreateWorkspace(worktreeName, path)
+	ws, err := a.registerWorktree(parentID, worktreeName, path, branch)
+	if err == nil {
+		a.startWorktreeSetup(ws.ID, repoPath, path, warning)
+	}
+	return ws, err
+}
+
+// registerWorktree records an existing git worktree as a workspace nested
+// under its repo.
+func (a *App) registerWorktree(parentID int64, name, path, branch string) (Workspace, error) {
+	ws, err := a.CreateWorkspace(name, path)
 	if err != nil {
 		return ws, err
 	}
@@ -130,9 +141,96 @@ func (a *App) CreateWorktree(repoPath, worktreeName, path, branch, baseRef strin
 	ws.IsGit = true
 	if err == nil {
 		emitWorkspacesChanged()
-		a.startWorktreeSetup(ws.ID, repoPath, path, warning)
 	}
 	return ws, err
+}
+
+// GitWorktree is a linked worktree git knows about but Burrow has no
+// workspace row for (made by hand, another tool, or a removed row).
+type GitWorktree struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+}
+
+// parseWorktreeList reads `git worktree list --porcelain`, skipping the main
+// checkout (always first), bare, prunable and detached entries.
+// ponytail: detached worktrees skipped — worktree_branch has to name a branch
+// (cleanup's merged rule deletes it); add them when someone needs one.
+func parseWorktreeList(out string) []GitWorktree {
+	var res []GitWorktree
+	for i, block := range strings.Split(strings.TrimSpace(out), "\n\n") {
+		if i == 0 {
+			continue
+		}
+		var wt GitWorktree
+		skip := false
+		for _, line := range strings.Split(block, "\n") {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				wt.Path = strings.TrimPrefix(line, "worktree ")
+			case strings.HasPrefix(line, "branch refs/heads/"):
+				wt.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+			case line == "bare", strings.HasPrefix(line, "prunable"):
+				skip = true
+			}
+		}
+		if !skip && wt.Path != "" && wt.Branch != "" {
+			res = append(res, wt)
+		}
+	}
+	return res
+}
+
+func (a *App) workspacePathKnown(path string) bool {
+	paths := []string{path}
+	if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
+		paths = append(paths, real)
+	}
+	for _, p := range paths {
+		var id int64
+		if a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, p).Scan(&id) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ListGitWorktrees lists the repo's worktrees that have no workspace row yet.
+func (a *App) ListGitWorktrees(repoPath string) ([]GitWorktree, error) {
+	out := runCmd("git", repoPath, []string{"worktree", "list", "--porcelain"})
+	if !out.Success {
+		return nil, gitErr(out)
+	}
+	res := []GitWorktree{}
+	for _, wt := range parseWorktreeList(out.Stdout) {
+		if !a.workspacePathKnown(wt.Path) {
+			res = append(res, wt)
+		}
+	}
+	return res, nil
+}
+
+// AdoptWorktree registers one of the repo's existing worktrees as a
+// workspace. Only a path git itself lists for that repo is accepted.
+func (a *App) AdoptWorktree(repoPath, path string) (Workspace, error) {
+	var parentID int64
+	if err := a.db.QueryRow(`SELECT id FROM workspaces WHERE path = ?`, repoPath).Scan(&parentID); err != nil {
+		return Workspace{}, err
+	}
+	out := runCmd("git", repoPath, []string{"worktree", "list", "--porcelain"})
+	if !out.Success {
+		return Workspace{}, gitErr(out)
+	}
+	for _, wt := range parseWorktreeList(out.Stdout) {
+		if wt.Path != path {
+			continue
+		}
+		if ws, err := scanWorkspace(a.db.QueryRow("SELECT "+workspaceCols+" FROM workspaces WHERE path = ?", path)); err == nil {
+			return ws, nil
+		}
+		return a.registerWorktree(parentID, wt.Branch, wt.Path, wt.Branch)
+	}
+	return Workspace{}, fmt.Errorf("%s is not a worktree of %s", path, repoPath)
 }
 
 // RenameWorktreeBranch renames a worktree's branch in place (git branch -m —

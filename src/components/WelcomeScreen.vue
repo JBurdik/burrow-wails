@@ -151,6 +151,8 @@
         :disabled="worktreeBusy"
         :error="worktreeError"
         @select-mode="selectWorktreeMode"
+        :worktrees="existingWorktrees"
+        @pick-worktree="pickExistingWorktree"
       />
     </template>
     <template v-else>
@@ -191,7 +193,7 @@ import { buildTerminalCommand, terminalProgramFor } from "@/lib/agentCommand";
 import { getProjectSettings, worktreePath as projectWorktreePath } from "@/lib/projectSettings";
 import { parsePrRef } from "@/lib/prLinkInput";
 import { openPrInWorktree } from "@/lib/prCheckout";
-import WorkspaceTargetPicker from "@/components/WorkspaceTargetPicker.vue";
+import WorkspaceTargetPicker, { type ExistingWorktree } from "@/components/WorkspaceTargetPicker.vue";
 import { compact } from "@/lib/viewport";
 
 const emit = defineEmits<{ (e: "open-folder"): void }>();
@@ -463,6 +465,50 @@ async function switchBranch(name: string) {
 async function createBranch(name: string) {
   try { await git.createBranch(name); }
   catch (e) { console.error("branch create failed", e); }
+}
+
+// Every worktree of the target's repo except the one already targeted: the
+// ones Burrow has rows for, plus the ones git lists that it doesn't (made by
+// hand or another tool) — picking one of those adopts it as a workspace.
+const unregisteredWorktrees = shallowRef<ExistingWorktree[]>([]);
+const repoRoot = computed(() => {
+  const t = target.value;
+  return t ? store.workspaces.find((w) => w.id === (t.parent_id ?? t.id)) ?? null : null;
+});
+const existingWorktrees = computed<ExistingWorktree[]>(() => {
+  const repo = repoRoot.value;
+  if (!repo) return [];
+  const known = (store.worktreesByParent[repo.id] || [])
+    .filter((w) => w.id !== target.value?.id)
+    .map((w) => ({ path: w.path, branch: w.worktree_branch || w.name }));
+  return [...known, ...unregisteredWorktrees.value];
+});
+async function refreshUnregisteredWorktrees() {
+  const repo = repoRoot.value;
+  unregisteredWorktrees.value = [];
+  if (!repo) return;
+  try {
+    unregisteredWorktrees.value = await invoke<ExistingWorktree[]>("list_git_worktrees", { repoPath: repo.path });
+  } catch {
+    // not a repo / git missing: offer only the known ones
+  }
+}
+watch(() => [repoRoot.value?.id, store.workspaces.length], () => void refreshUnregisteredWorktrees(), { immediate: true });
+
+async function pickExistingWorktree(wt: ExistingWorktree) {
+  worktreeError.value = "";
+  worktreeMode.value = "current";
+  const known = store.workspaces.find((w) => w.path === wt.path);
+  if (known) return pick(known);
+  const repo = repoRoot.value;
+  if (!repo) return;
+  try {
+    const ws = await invoke<Workspace>("adopt_worktree", { repoPath: repo.path, path: wt.path });
+    await store.load();
+    pick(store.workspaces.find((w) => w.id === ws.id) ?? ws);
+  } catch (err) {
+    worktreeError.value = err instanceof Error ? err.message : String(err);
+  }
 }
 
 function worktreePath(workspace: Workspace, branch: string): string {

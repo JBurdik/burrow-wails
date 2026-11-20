@@ -256,6 +256,8 @@ var remoteAllowed = map[string]remoteCmd{
 
 	// Worktrees
 	"create_worktree":          {Method: "CreateWorktree", Args: []string{"repoPath", "name", "path", "branch", "baseRef"}, Scope: scopeOrchOperate},
+	"list_git_worktrees":       {Method: "ListGitWorktrees", Args: []string{"repoPath"}, Scope: scopeOrchRead},
+	"adopt_worktree":           {Method: "AdoptWorktree", Args: []string{"repoPath", "path"}, Scope: scopeOrchOperate},
 	"rename_worktree_branch":   {Method: "RenameWorktreeBranch", Args: []string{"id", "oldBranch", "newBranch"}, Scope: scopeOrchOperate},
 	"remove_worktree":          {Method: "RemoveWorktree", Args: []string{"id", "force"}, Scope: scopeOrchOperate},
 	"worktree_cleanup_preview": {Method: "WorktreeCleanupPreview", Args: nil, Scope: scopeOrchRead},

@@ -6,6 +6,7 @@ import { PopoverContent, PopoverRoot, PopoverTrigger } from "@/components/ui/pop
 
 type TargetMode = "current" | "new";
 type TargetAppearance = "attached" | "inline";
+export type ExistingWorktree = { path: string; branch: string };
 
 const props = defineProps<{
   mode: TargetMode;
@@ -19,12 +20,15 @@ const props = defineProps<{
   branches?: string[];
   disabled?: boolean;
   error?: string;
+  /** Existing worktrees of the repo to start in instead (picker under the composer). */
+  worktrees?: ExistingWorktree[];
 }>();
 
 const emit = defineEmits<{
   selectMode: [mode: TargetMode];
   switchBranch: [name: string];
   createBranch: [name: string];
+  pickWorktree: [worktree: ExistingWorktree];
 }>();
 
 // Branch switcher, moved here from the title bar so the branch lives in one
@@ -103,6 +107,21 @@ function selectMode(mode: TargetMode) {
           <PhGitBranch :size="12" weight="bold" class="mr-1.5 shrink-0" />
           New worktree
         </DropdownMenuItem>
+        <template v-if="props.worktrees?.length">
+          <p class="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Existing worktrees</p>
+          <div class="max-h-[200px] overflow-y-auto">
+            <DropdownMenuItem
+              v-for="wt in props.worktrees"
+              :key="wt.path"
+              class="text-[11.5px]"
+              :title="wt.path"
+              @select="emit('pickWorktree', wt)"
+            >
+              <PhGitBranch :size="12" class="mr-1.5 shrink-0 text-muted-foreground" />
+              <span class="truncate">{{ wt.branch }}</span>
+            </DropdownMenuItem>
+          </div>
+        </template>
       </DropdownMenuContent>
     </DropdownMenuRoot>
     <span v-else class="inline-flex cursor-default items-center gap-1.5 rounded-[5px] px-[5px] py-1">
