@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Self-update, replacing tauri-plugin-updater. Same shape as before: a
@@ -161,8 +162,14 @@ func (a *App) RelaunchApp() error {
 	if err != nil {
 		return err
 	}
-	// -n forces a new instance so `open` doesn't just focus the dying one.
-	if err := exec.Command("/usr/bin/open", "-n", bundle).Start(); err != nil {
+	// -n forces a new instance so `open` doesn't just focus the dying one —
+	// started only once this process is gone: the UI is single-instance
+	// (main.go), so a copy launched while we still hold the lock would just
+	// hand off to us and exit, leaving no window at all.
+	cmd := exec.Command("/bin/sh", "-c", `while kill -0 "$0" 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open -n "$1"`,
+		strconv.Itoa(os.Getpid()), bundle)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
 		return err
 	}
 	desktopQuit()

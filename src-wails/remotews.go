@@ -186,6 +186,7 @@ type remoteWS struct {
 	connMu     sync.Mutex
 	conns      map[string]map[uint64]func()
 	nextConnID uint64
+	uiGoneAt   time.Time // when the last desktop-ui socket closed (uiRecentlyGone)
 
 	// call is the seam the concurrency tests use to stand in a command that
 	// blocks on demand; no real App method does so deterministically.
@@ -217,6 +218,15 @@ func (h *remoteWS) uiConnected() bool {
 	return len(h.conns[desktopUIDevice]) > 0
 }
 
+// uiRecentlyGone: the UI's last socket closed within d — most likely a
+// reconnect in progress (sleep, ping timeout, a dropped slow client), not a
+// closed window.
+func (h *remoteWS) uiRecentlyGone(d time.Duration) bool {
+	h.connMu.Lock()
+	defer h.connMu.Unlock()
+	return len(h.conns[desktopUIDevice]) == 0 && !h.uiGoneAt.IsZero() && time.Since(h.uiGoneAt) < d
+}
+
 // trackConn registers a connection's shutdown under its device, returning the
 // function that removes it again. A deviceID of "" is the desktop and is not
 // tracked (see the conns field).
@@ -239,6 +249,9 @@ func (h *remoteWS) trackConn(deviceID string, shutdown func()) func() {
 		delete(h.conns[deviceID], id)
 		if len(h.conns[deviceID]) == 0 {
 			delete(h.conns, deviceID)
+			if deviceID == desktopUIDevice {
+				h.uiGoneAt = time.Now()
+			}
 		}
 	}
 }

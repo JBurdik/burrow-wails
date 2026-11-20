@@ -6,6 +6,7 @@ import (
 	"embed"
 	"io/fs"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -34,6 +35,22 @@ func main() {
 		Services: []application.Service{application.NewService(&DesktopService{a: app, ui: true})},
 		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(dist)},
 		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
+		// One UI process per channel + data dir. The core starts the UI with
+		// `open -n` whenever it sees no UI socket — and a socket can be down
+		// for a moment while the window is very much open (sleep, ping
+		// timeout), which used to put a second main window on screen. A second
+		// launch now hands its --route to this one and exits.
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: uiInstanceID(),
+			OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
+				showMainWindow()
+				for i, a := range d.Args {
+					if a == "--route" && i+1 < len(d.Args) && d.Args[i+1] != "" {
+						desktopEmit("menu-navigate", d.Args[i+1])
+					}
+				}
+			},
+		},
 		// ⌘Q never fires WindowClosing, so the geometry is saved here too.
 		ShouldQuit: func() bool {
 			quitting.Store(true)
@@ -98,6 +115,11 @@ func main() {
 
 // startURL: a UI the core started for a tray / notification click opens at
 // that route; anything else at the app's root.
+func uiInstanceID() string {
+	dir, _ := appDataDir()
+	return "com.burrow.ui." + buildChannel + "." + filepath.Base(dir)
+}
+
 func startURL() string {
 	if r := uiStartRoute(); r != "" {
 		return "/#" + r

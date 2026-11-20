@@ -144,6 +144,15 @@ func runCore() {
 		if app.remoteWS.uiConnected() {
 			return
 		}
+		// A UI that just dropped its socket is usually reconnecting: wait for
+		// it rather than pull a window forward (or, before single-instance,
+		// start a second one) under the user's hands.
+		for i := 0; i < 50 && app.remoteWS.uiRecentlyGone(2*time.Minute); i++ { // ≤ 5 s
+			time.Sleep(100 * time.Millisecond)
+		}
+		if app.remoteWS.uiConnected() {
+			return
+		}
 		openUI("")
 		for i := 0; i < 100 && !app.remoteWS.uiConnected(); i++ { // ≤ 10 s
 			time.Sleep(100 * time.Millisecond)
