@@ -6,6 +6,11 @@
 // re-encoding between the daemon and the app process.
 package daemonproto
 
+import (
+	"fmt"
+	"os"
+)
+
 // Request is a client -> daemon message. Kind selects which fields matter.
 type Request struct {
 	ReqID string   `json:"reqId"`
@@ -35,6 +40,10 @@ type Response struct {
 	// "orphaned process left over from a deleted build/worktree" and replace
 	// the latter instead of silently reattaching to dead code forever.
 	ExePath string `json:"exePath,omitempty"`
+	// ExeFP answers "version": FileFingerprint of the daemon's binary as it
+	// was when the daemon STARTED. An update swaps the bundle in place, so the
+	// path still matches afterwards; this is what tells the old code apart.
+	ExeFP string `json:"exeFp,omitempty"`
 	// FDA answers "privacy": this daemon's own Full Disk Access (it is the
 	// process macOS holds responsible for every shell), with ExePath.
 	FDA string `json:"fda,omitempty"`
@@ -96,4 +105,13 @@ func IntsToBytes(ints []int) []byte {
 		out[i] = byte(v)
 	}
 	return out
+}
+
+// FileFingerprint is size:mtime of path, "" when it can't be read.
+func FileFingerprint(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", fi.Size(), fi.ModTime().UnixNano())
 }

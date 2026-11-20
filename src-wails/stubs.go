@@ -61,7 +61,6 @@ func (a *App) RemoteSyncChat(_chat map[string]any) error { return nil }
 // --- Daemon admin (daemon.go doesn't exist yet — these operate through
 // DaemonClient once it grows a stats/restart RPC; no-op for now) ---
 
-func (a *App) DaemonStats() map[string]any              { return map[string]any{} }
 func (a *App) CleanDaemon() int                         { return 0 }
 func (a *App) KillOrphanSessions(_keepIDs []string) int { return 0 }
 

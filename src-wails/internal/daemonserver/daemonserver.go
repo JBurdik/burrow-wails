@@ -50,6 +50,12 @@ func (c *client) send(env daemonproto.Envelope) {
 	_ = c.conn.SetWriteDeadline(time.Time{})
 }
 
+// startFP: this daemon's binary as it was at start (see daemonproto.ExeFP).
+var startFP = func() string {
+	exe, _ := os.Executable()
+	return daemonproto.FileFingerprint(exe)
+}()
+
 func New(socketPath string) *Server {
 	s := &Server{socketPath: socketPath, clients: make(map[*client]struct{})}
 	s.mgr = ptycore.NewManager(s)
@@ -159,6 +165,7 @@ func (s *Server) handle(req daemonproto.Request) *daemonproto.Response {
 	case "version":
 		resp.Emulator = ptycore.Emulator()
 		resp.ExePath, _ = os.Executable()
+		resp.ExeFP = startFP
 		resp.Pid = os.Getpid()
 	case "privacy":
 		resp.ExePath, _ = os.Executable()

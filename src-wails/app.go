@@ -277,6 +277,7 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.daemon.Ensure(); err != nil {
 		log.Printf("daemon: %v", err)
 	}
+	go a.daemon.upgradeLoop()
 
 	binDir, err := ensureBurrowBin(dataDir)
 	if err != nil {

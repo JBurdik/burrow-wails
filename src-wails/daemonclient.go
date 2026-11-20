@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -43,6 +44,10 @@ type DaemonClient struct {
 	// it goes on the bus — the server-side byte path (OSC 7501, programstatus.go).
 	// Set once before Ensure; nil = off.
 	tap func(id string, data []int)
+
+	// outdated: the live daemon predates the binary next to us (an update)
+	// and was kept for its terminals. Cleared by a replace / Restart.
+	outdated atomic.Bool
 }
 
 func NewDaemonClient(ctx context.Context, sockPath string) *DaemonClient {
@@ -121,7 +126,19 @@ func (d *DaemonClient) staleAndReplaced() bool {
 	}
 	if resp.ExePath == want {
 		if _, err := os.Stat(resp.ExePath); err == nil {
-			return false // same binary, still on disk: current
+			if resp.ExeFP == daemonproto.FileFingerprint(want) {
+				d.outdated.Store(false)
+				return false // same binary, still on disk: current
+			}
+			// Same path, other bytes: an update swapped the bundle under a
+			// daemon that survived it (that is the point of the daemon). Its
+			// terminals are worth more than its new code: replace it only
+			// while it holds none, else flag it (daemonUpgradeLoop, TitleBar).
+			if ids, err := d.List(); err != nil || len(ids) > 0 {
+				d.outdated.Store(true)
+				log.Printf("daemon: pid %d runs a pre-update binary; keeping it for its %d live terminal(s)", resp.Pid, len(ids))
+				return false
+			}
 		}
 	}
 	log.Printf("daemon: replacing stale daemon pid %d (%s), want %s", resp.Pid, resp.ExePath, want)
@@ -218,6 +235,7 @@ func (d *DaemonClient) Restart() (int, error) {
 	if err := d.spawnAndConnect(); err != nil {
 		return 0, err
 	}
+	d.outdated.Store(false)
 	resp, err := d.call(daemonproto.Request{Kind: "version"})
 	if err != nil {
 		return 0, err
@@ -474,4 +492,43 @@ func (d *DaemonClient) List() ([]string, error) {
 		return []string{}, nil // never hand JS a null to .map over
 	}
 	return resp.IDs, nil
+}
+
+// Outdated reports a pre-update daemon kept alive for its terminals.
+func (d *DaemonClient) Outdated() bool { return d.outdated.Load() }
+
+// upgradeLoop finishes an update for the daemon: once the pre-update
+// daemon holds no terminal, it is swapped for the current binary.
+// ponytail: List and Restart are not atomic — a tab opened in that instant dies
+// with the old daemon; a daemon-side "exit when empty" would close the gap.
+func (d *DaemonClient) upgradeLoop() {
+	for range time.Tick(time.Minute) {
+		if !d.Outdated() {
+			continue
+		}
+		if ids, err := d.List(); err == nil && len(ids) == 0 {
+			if pid, err := d.Restart(); err == nil {
+				log.Printf("daemon: replaced the pre-update daemon (now pid %d)", pid)
+			}
+		}
+	}
+}
+
+// DaemonStats backs the TitleBar's daemon row. Exited PTYs leave the daemon's
+// list at once, so alive == total.
+func (a *App) DaemonStats() map[string]any {
+	out := map[string]any{"connected": false, "pid": nil, "total": 0, "alive": 0, "outdated": false}
+	if a.daemon == nil {
+		return out
+	}
+	out["outdated"] = a.daemon.Outdated()
+	ids, err := a.daemon.List()
+	if err != nil {
+		return out
+	}
+	out["connected"], out["total"], out["alive"] = true, len(ids), len(ids)
+	if resp, err := a.daemon.call(daemonproto.Request{Kind: "version"}); err == nil && resp.Pid > 0 {
+		out["pid"] = resp.Pid
+	}
+	return out
 }

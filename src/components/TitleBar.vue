@@ -117,12 +117,13 @@
     <div class="flex shrink-0 items-center gap-0.5 pr-2 [-webkit-app-region:no-drag]">
       <div class="tb-wide relative flex">
         <button
-          class="tb-btn"
+          class="tb-btn relative"
           title="System & daemon stats"
           @click.stop="toggleStats"
         >
           <PhGauge :size="14" />
           <PhCaretDown :size="9" />
+          <span v-if="daemon?.outdated" class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-accent" />
         </button>
         <div v-if="statsOpen" class="tb-menu min-w-[200px] p-2" @click.stop>
           <div class="flex items-center justify-between px-0.5 py-0.5 font-sans text-xs text-secondary-foreground">
@@ -146,6 +147,9 @@
             </span>
           </div>
           <div v-if="daemon?.pid" class="px-0.5 pb-0.5 font-mono text-[10px] text-muted-foreground">pid {{ daemon.pid }}</div>
+          <div v-if="daemon?.outdated" class="px-0.5 pb-0.5 font-sans text-[11px] text-secondary-foreground">
+            Terminals run the pre-update daemon. It updates by itself once every terminal is closed, or restart it now.
+          </div>
 
           <div class="my-1.5 h-px bg-border" />
 
@@ -161,7 +165,7 @@
             <PhSkull :size="14" />Kill orphaned sessions
           </button>
           <button class="tb-menu-item tb-menu-item-danger" :disabled="busy" @click="restartDaemon">
-            <PhArrowsClockwise :size="14" />Restart daemon
+            <PhArrowsClockwise :size="14" />{{ daemon?.outdated ? "Restart terminals to update" : "Restart daemon" }}
           </button>
           <div v-if="actionMsg" class="px-0.5 pb-0.5 pt-1.5 text-center font-sans text-[11px] text-muted-foreground">{{ actionMsg }}</div>
         </div>
@@ -351,7 +355,7 @@ watch(
 
 // ── Stats dropdown ──────────────────────────────────────────────────────────
 type SystemStats = { cpu_percent: number; mem_used: number; mem_total: number };
-type DaemonStats = { connected: boolean; pid: number | null; total: number; alive: number };
+type DaemonStats = { connected: boolean; pid: number | null; total: number; alive: number; outdated?: boolean };
 
 const statsOpen = ref(false);
 const stats = ref<SystemStats | null>(null);
@@ -443,11 +447,17 @@ function onDocClick() {
   notifOpen.value = false;
   if (statsOpen.value) { statsOpen.value = false; clearInterval(statsTimer); }
 }
+// The dot on the gauge: an update left the old daemon running for its terminals.
+let outdatedTimer: number | undefined;
 onMounted(() => {
   window.addEventListener("click", onDocClick);
+  const check = () => { if (!statsOpen.value) invoke<DaemonStats>("daemon_stats").then((d) => (daemon.value = d), () => {}); };
+  check();
+  outdatedTimer = window.setInterval(check, 5 * 60_000);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("click", onDocClick);
+  clearInterval(outdatedTimer);
   clearInterval(statsTimer);
   clearTimeout(bellPulseTimer);
 });
