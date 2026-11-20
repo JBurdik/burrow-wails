@@ -607,6 +607,14 @@ onMounted(async () => {
     cols: term.cols,
     rows: term.rows,
   });
+  // A PTY the daemon still holds (app restart, RP pop-out/back, remount) is a
+  // reattach: its command already ran. Typing initialCmd again re-ran old agent
+  // processes on every reopen. Unknown (list failed) = treat as fresh.
+  const alreadyLive = props.initialCmd
+    ? await invoke<Array<{ pty_id: number }>>("list_pty_sessions")
+        .then((s) => s.some((x) => x.pty_id === props.ptyId))
+        .catch(() => false)
+    : false;
   try {
     await createPty();
     emit("pty-ready");
@@ -627,7 +635,8 @@ onMounted(async () => {
   // interleaved with the prompt and zsh parsed the prompt text as a command.
   // Instead wait for the PTY to emit output and then fall quiet (prompt printed,
   // init done), with a hard cap so we never hang if the shell stays silent.
-  if (props.initialCmd) {
+  if (alreadyLive) emit("cmd-sent");
+  else if (props.initialCmd) {
     // Insert launchArgs right after the binary name so flags precede the
     // prompt positional arg — newer Claude Code requires flags before positional args.
     const cmd = launchArgs
