@@ -1032,7 +1032,20 @@ function activateTab(id: number) {
 
 // async since chats.create() now gets its id from the database rather than
 // inventing one client-side. Every caller here is a fire-and-forget handler.
-async function openClaudeChat(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
+// While a local open runs, a new session in the store is (likely) its own:
+// adoptNewChats must not mint a tab for it first — the open would then find
+// that tab and drop its initial prompt / model / cwd.
+let localOpens = 0;
+async function openClaudeChat(...args: Parameters<typeof openClaudeChatNow>) {
+  localOpens++;
+  try {
+    return await openClaudeChatNow(...args);
+  } finally {
+    localOpens--;
+    adoptNewChats();
+  }
+}
+async function openClaudeChatNow(chatId?: number, agentId?: string, cwd?: string, initialPrompt?: string, initialImages?: string[], model?: string) {
   let session: import("@/stores/claudeChats").ClaudeSession;
   if (chatId != null) {
     session = chatsStore.sessions.find((s) => s.id === chatId)
@@ -1674,6 +1687,26 @@ watch(
   { deep: true },
 );
 
+// A thread created anywhere else — the phone, the tray panel, the CLI, another
+// window — reaches this store through chats-changed, but tabs were only minted
+// by the mount-time restore, so it stayed invisible until a reload. Adopt it as
+// a background tab (no activate: someone else's thread must not grab the view).
+// Same set the restore opens, minus side chats (they live in the Right Panel).
+// Only chats this Terminal never held a tab for: a closed tab's chat is still
+// unarchived for a moment (archive() awaits the stop first) and must not come back.
+const knownChats = new Set<number>();
+function adoptNewChats() {
+  if (!restored || localOpens > 0) return;
+  for (const t of tabs.value) for (const l of getAllLeaves(t.root)) if (l.chatId != null) knownChats.add(l.chatId);
+  for (const s of chatsStore.sessionsForWs(props.workspaceId)) {
+    if (s.kind === "side" || knownChats.has(s.id)) continue;
+    knownChats.add(s.id);
+    const id = nextPtyId();
+    tabs.value.push({ id, root: { type: "leaf", id, title: s.title, defaultTitle: s.title, isAgent: false, busy: false, status: "idle", leafType: "chat", chatId: s.id } });
+  }
+}
+watch(() => chatsStore.sessionsForWs(props.workspaceId).map((s) => s.id).join(","), adoptNewChats);
+
 // Seeing the active tab again clears any "review" badge it earned while hidden.
 // Both triggers route through `seeActiveTab`, which re-checks the full view
 // state — switching workspace, or coming back to the tabs from the dashboard or
@@ -1845,6 +1878,7 @@ onMounted(async () => {
   }
 
   restored = true;
+  adoptNewChats(); // a chat that landed while the restore awaited
   ready.value = true;
   persist(); // the restore may have renumbered dead PTYs; save the ids we settled on
   syncStore();
