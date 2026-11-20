@@ -87,7 +87,7 @@ func (a *App) findSameWork(chatID int64, text string) []sameWorkHit {
 	}
 	myRepo := repoOf(self.WorkspaceID)
 	rows, err := a.db.Query(`SELECT c.id, c.workspace_id, c.title, c.recap,
-			COALESCE((SELECT s.line FROM chat_stream s WHERE s.chat_id = c.id AND s.kind = ? ORDER BY s.ord LIMIT 1), '')
+			COALESCE((SELECT s.line FROM chat_stream s WHERE s.chat_id = CAST(c.id AS TEXT) AND s.kind = ? ORDER BY s.ord LIMIT 1), '')
 		FROM chats c WHERE c.id != ? AND c.archived_at = 0 AND c.parent_chat_id = 0 AND c.kind != 'side'`, chatUserKind, chatID)
 	if err != nil {
 		return nil
